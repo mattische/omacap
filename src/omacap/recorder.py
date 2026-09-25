@@ -10,6 +10,7 @@ import signal
 import subprocess
 import threading
 import time
+from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -40,6 +41,13 @@ _ERROR_RE = re.compile(
 
 #: Quietest level the meter will show; anything below reads as silence.
 METER_FLOOR_DB = -60.0
+
+#: Filter chain behind the live level meter. astats publishes the peak level as
+#: frame metadata and ametadata prints it to ffmpeg's log.
+METER_FILTER = (
+    "astats=metadata=1:reset=8:measure_perchannel=none:measure_overall=Peak_level,"
+    "ametadata=mode=print:key=lavfi.astats.Overall.Peak_level"
+)
 
 
 class RecorderError(RuntimeError):
@@ -95,16 +103,10 @@ class RecorderConfig:
             "-i", self.source.name,
         ]
         if self.meter:
-            # astats publishes the peak level as frame metadata and ametadata
-            # prints it to ffmpeg's log. The log is flushed line by line, whereas
-            # ametadata's own file=- output is block-buffered and would only
-            # arrive once recording ended - no good for a live meter.
-            cmd += [
-                "-af",
-                "astats=metadata=1:reset=8:measure_perchannel=none"
-                ":measure_overall=Peak_level,"
-                "ametadata=mode=print:key=lavfi.astats.Overall.Peak_level",
-            ]
+            # The log is flushed line by line, whereas ametadata's own file=-
+            # output is block-buffered and would only arrive once recording
+            # ended - no good for a live meter.
+            cmd += ["-af", METER_FILTER]
         cmd += ["-ac", str(self.channels), "-ar", str(self.sample_rate)]
         cmd += self.audio_format.encoder_args(self.bitrate)
         if self.duration is not None:
@@ -164,6 +166,80 @@ def ensure_ffmpeg() -> str:
     return path
 
 
+@lru_cache(maxsize=1)
+def available_encoders() -> frozenset[str]:
+    """Audio encoder names this ffmpeg build can use.
+
+    An empty set means the question could not be answered, in which case callers
+    must not treat a format as unavailable.
+    """
+    try:
+        proc = subprocess.run(
+            [ensure_ffmpeg(), "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired, RecorderError):
+        return frozenset()
+    if proc.returncode != 0:
+        return frozenset()
+
+    names = set()
+    listing_started = False
+    for line in proc.stdout.splitlines():
+        if not listing_started:
+            # A row of dashes separates the flag legend from the encoder list.
+            listing_started = line.strip().startswith("---")
+            continue
+        fields = line.split()
+        if len(fields) >= 2 and len(fields[0]) == 6 and fields[0][0] == "A":
+            names.add(fields[1])
+    return frozenset(names)
+
+
+def format_is_available(audio_format: AudioFormat) -> bool:
+    """Whether this ffmpeg can encode to ``audio_format``."""
+    encoders = available_encoders()
+    return not encoders or audio_format.codec in encoders
+
+
+def ensure_format(audio_format: AudioFormat) -> None:
+    """Check the encoder exists, before a recording silently fails to start."""
+    if not format_is_available(audio_format):
+        raise RecorderError(
+            f"this ffmpeg build cannot encode {audio_format.name} "
+            f"(encoder {audio_format.codec!r} is missing). "
+            f"Run 'omacap formats' to see what is available, or install a "
+            f"fuller ffmpeg build."
+        )
+
+
+@lru_cache(maxsize=1)
+def metering_supported() -> bool:
+    """Whether this ffmpeg understands the level meter's filter chain.
+
+    Older builds reject options such as ``measure_overall``, and an unusable
+    filter makes ffmpeg refuse to start at all - which would lose the recording
+    rather than just the meter. Probing once is cheap insurance.
+    """
+    try:
+        proc = subprocess.run(
+            [
+                ensure_ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostdin",
+                "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
+                "-af", METER_FILTER,
+                "-t", "0.05", "-f", "null", os.devnull,
+            ],
+            capture_output=True,
+            timeout=15,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired, RecorderError):
+        return False
+    return proc.returncode == 0
+
+
 def parse_peak_db(line: str) -> float | None:
     """Extract a peak level in dBFS from an ametadata line, if present."""
     match = _PEAK_RE.search(line)
@@ -206,6 +282,10 @@ class Recorder:
         if self.state is not State.IDLE:
             raise RecorderError(f"recorder already used (state: {self.state.value})")
         ensure_ffmpeg()
+        ensure_format(self.config.audio_format)
+        if self.config.meter and not metering_supported():
+            # Lose the meter rather than the recording.
+            self.config.meter = False
         self.config.output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             self._process = subprocess.Popen(

@@ -428,3 +428,29 @@ def test_the_chart_format_cycles(app):
     assert app.chart_format == "txt"
     press(app, "t")
     assert app.chart_format == "md"
+
+
+# -- ffmpeg capability handling -------------------------------------------
+
+def test_format_cycling_skips_what_ffmpeg_cannot_write(app, monkeypatch):
+    from omacap.formats import get_format as lookup
+
+    usable = {"mp3", "wav"}
+    monkeypatch.setattr(
+        tui, "format_is_available", lambda fmt: fmt.name in usable
+    )
+    seen = set()
+    for _ in range(6):
+        press(app, "f")
+        seen.add(app.audio_format.name)
+    assert seen <= usable
+    assert lookup("m4a").name not in seen
+
+
+def test_cycling_reports_when_nothing_is_usable(app, monkeypatch):
+    monkeypatch.setattr(tui, "format_is_available", lambda fmt: False)
+    before = app.audio_format.name
+    press(app, "f")
+    assert app.audio_format.name == before
+    assert app.message_kind == "error"
+    assert "No usable output formats" in app.message

@@ -21,7 +21,28 @@ FAKE_FFMPEG = r'''#!/usr/bin/env python3
 import signal, sys, time
 from pathlib import Path
 
+ENCODER_LISTING = """Encoders:
+ V..... = Video
+ A..... = Audio
+ ------
+ A....D pcm_s16le            PCM signed 16-bit little-endian
+ A....D flac                 FLAC (Free Lossless Audio Codec)
+ A....D libmp3lame           libmp3lame MP3 (codec mp3)
+ A....D aac                  AAC (Advanced Audio Coding)
+ A....D libopus              libopus Opus (codec opus)
+ A....D libvorbis            libvorbis (codec vorbis)"""
+
 args = sys.argv[1:]
+
+# Capability probes come first: omacap asks what this build can do before it
+# records anything. Without these the stub would treat "-encoders" as an output
+# path and record into it until the probe timed out.
+if "-encoders" in args:
+    print(ENCODER_LISTING)
+    sys.exit(0)
+if "null" in args:
+    sys.exit(0)          # the level-meter probe
+
 out = Path(args[-1])
 duration = None
 if "-t" in args:
@@ -67,6 +88,21 @@ sys.exit(255 if stop else 0)
 #: Refuses to start, the way ffmpeg does for a bad source.
 FAILING_FFMPEG = r'''#!/usr/bin/env python3
 import sys
+ENCODER_LISTING = """Encoders:
+ ------
+ A....D pcm_s16le            PCM signed 16-bit little-endian
+ A....D flac                 FLAC (Free Lossless Audio Codec)
+ A....D libmp3lame           libmp3lame MP3 (codec mp3)
+ A....D aac                  AAC (Advanced Audio Coding)
+ A....D libopus              libopus Opus (codec opus)
+ A....D libvorbis            libvorbis (codec vorbis)"""
+args = sys.argv[1:]
+# Answer the capability probes, then fail at the actual recording.
+if "-encoders" in args:
+    print(ENCODER_LISTING)
+    sys.exit(0)
+if "null" in args:
+    sys.exit(0)
 print("[pulse @ 0x0] Cannot connect to server: Connection refused", file=sys.stderr)
 sys.exit(1)
 '''
@@ -79,12 +115,63 @@ def _install(directory: Path, name: str, body: str) -> Path:
     return path
 
 
+def _reset_capability_caches() -> None:
+    """Capability probes are cached per process; each test needs a clean slate."""
+    from omacap import recorder
+
+    recorder.available_encoders.cache_clear()
+    recorder.metering_supported.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def fresh_capability_probes():
+    _reset_capability_caches()
+    yield
+    _reset_capability_caches()
+
+
 @pytest.fixture
 def fake_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     path = _install(bindir, "ffmpeg", FAKE_FFMPEG)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    _reset_capability_caches()
+    return path
+
+
+#: Mimics an ffmpeg that lists encoders but rejects the meter's filter chain,
+#: the way an older build does.
+NO_METER_FFMPEG = r'''#!/usr/bin/env python3
+import subprocess, sys
+args = sys.argv[1:]
+if any("astats" in a for a in args):
+    print("Error applying option 'measure_overall' to filter 'astats': "
+          "Option not found", file=sys.stderr)
+    sys.exit(8)
+sys.exit(subprocess.call([REAL_FAKE] + args))
+'''
+
+#: Mimics a minimal build with no MP3 encoder.
+NO_MP3_ENCODERS = """Encoders:
+ V..... = Video
+ ------
+ A....D pcm_s16le            PCM signed 16-bit little-endian
+ A....D flac                 FLAC (Free Lossless Audio Codec)
+ A....D aac                  AAC (Advanced Audio Coding)
+"""
+
+
+@pytest.fixture
+def ffmpeg_without_meter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An ffmpeg that records fine but cannot run the level meter."""
+    bindir = tmp_path / "nometer"
+    bindir.mkdir()
+    inner = _install(bindir, "ffmpeg-real", FAKE_FFMPEG)
+    body = NO_METER_FFMPEG.replace("REAL_FAKE", repr(str(inner)))
+    path = _install(bindir, "ffmpeg", body)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    _reset_capability_caches()
     return path
 
 

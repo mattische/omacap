@@ -250,3 +250,105 @@ def test_parent_directories_are_created(fake_ffmpeg, monitor_source, tmp_path):
     recorder.start()
     assert wait_until(lambda: recorder.duration > 0.1)
     assert recorder.stop().exists
+
+
+# -- ffmpeg capability probing -------------------------------------------
+
+def test_encoders_are_discovered(fake_ffmpeg):
+    from omacap.recorder import available_encoders
+
+    encoders = available_encoders()
+    assert "libmp3lame" in encoders
+    assert "pcm_s16le" in encoders
+    # The flag legend above the listing must not be mistaken for an encoder.
+    assert "=" not in encoders
+    assert "Audio" not in encoders
+
+
+def test_every_shipped_format_is_checked_against_the_encoders(fake_ffmpeg):
+    from omacap.formats import FORMATS
+    from omacap.recorder import format_is_available
+
+    assert all(format_is_available(fmt) for fmt in FORMATS)
+
+
+def test_a_missing_encoder_is_reported_before_recording(fake_ffmpeg, monkeypatch):
+    from omacap import recorder
+
+    monkeypatch.setattr(recorder, "available_encoders", lambda: frozenset({"flac"}))
+    with pytest.raises(RecorderError, match="cannot encode mp3"):
+        recorder.ensure_format(get_format("mp3"))
+    recorder.ensure_format(get_format("flac"))     # this one is fine
+
+
+def test_an_unknown_encoder_list_never_blocks_recording(monkeypatch):
+    """If the probe fails we must assume the format works, not refuse it."""
+    from omacap import recorder
+
+    monkeypatch.setattr(recorder, "available_encoders", lambda: frozenset())
+    assert recorder.format_is_available(get_format("mp3"))
+    recorder.ensure_format(get_format("mp3"))
+
+
+def test_recording_a_format_with_no_encoder_fails_cleanly(
+    fake_ffmpeg, monitor_source, tmp_path, monkeypatch
+):
+    from omacap import recorder
+
+    monkeypatch.setattr(recorder, "available_encoders", lambda: frozenset({"flac"}))
+    take = Recorder(make_config(monitor_source, tmp_path, "mp3"))
+    with pytest.raises(RecorderError, match="cannot encode mp3"):
+        take.start()
+    assert not (tmp_path / "take.mp3").exists()
+
+
+def test_metering_is_probed_before_use(fake_ffmpeg):
+    from omacap.recorder import metering_supported
+
+    assert metering_supported() is True
+
+
+def test_an_ffmpeg_without_the_meter_filter_still_records(
+    ffmpeg_without_meter, monitor_source, tmp_path
+):
+    """An unusable filter makes ffmpeg refuse to start, so the meter must go."""
+    from omacap.recorder import metering_supported
+
+    assert metering_supported() is False
+
+    take = Recorder(make_config(monitor_source, tmp_path))
+    take.start()
+    assert take.config.meter is False
+    assert "-af" not in take.config.command()
+    assert wait_until(lambda: take.duration > 0.1)
+    result = take.stop()
+    assert take.state is State.FINISHED
+    assert result.exists
+
+
+def test_the_meter_reads_the_floor_when_unsupported(
+    ffmpeg_without_meter, monitor_source, tmp_path
+):
+    take = Recorder(make_config(monitor_source, tmp_path))
+    take.start()
+    assert wait_until(lambda: take.duration > 0.1)
+    assert take.peak_db == METER_FLOOR_DB
+    take.stop()
+
+
+def test_probes_are_cached(fake_ffmpeg, monkeypatch):
+    """The probes spawn ffmpeg, so they must run once per process, not per take."""
+    from omacap import recorder
+
+    calls = []
+    real_run = recorder.subprocess.run
+
+    def counting_run(command, *args, **kwargs):
+        calls.append(command)
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(recorder.subprocess, "run", counting_run)
+    for _ in range(3):
+        recorder.available_encoders()
+        recorder.metering_supported()
+    assert len(calls) == 2

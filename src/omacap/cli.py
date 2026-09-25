@@ -20,8 +20,12 @@ from .recorder import (
     Recorder,
     RecorderConfig,
     RecorderError,
+    available_encoders,
     build_output_path,
+    ensure_format,
     default_output_dir,
+    format_is_available,
+    metering_supported,
 )
 from .chart import (
     BARS_PER_LINE,
@@ -191,6 +195,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         directory = Path(args.dir).expanduser() if args.dir else default_output_dir()
         output_path = build_output_path(directory, audio_format, args.name)
 
+    ensure_format(audio_format)
     recorder = Recorder(
         RecorderConfig(
             source=source,
@@ -306,11 +311,21 @@ def cmd_devices() -> int:
 
 def cmd_formats() -> int:
     print("Output formats:")
+    missing = []
     for fmt in FORMATS:
         kind = "lossless" if fmt.lossless else f"lossy, default {fmt.default_bitrate}"
-        print(f"  {fmt.name:<5} {fmt.extension:<6} {kind}")
+        available = format_is_available(fmt)
+        if not available:
+            missing.append(fmt.name)
+        mark = "" if available else "   [unavailable in this ffmpeg build]"
+        print(f"  {fmt.name:<5} {fmt.extension:<6} {kind}{mark}")
         print(f"        {fmt.description}")
     print("\n'mp4' is accepted as an alias for 'm4a'.")
+    if missing:
+        print(
+            f"Unavailable here: {', '.join(missing)}. "
+            "Install a fuller ffmpeg build to use them."
+        )
     return 0
 
 
@@ -321,6 +336,22 @@ def cmd_doctor() -> int:
     ffmpeg = shutil.which("ffmpeg")
     print(f"[{'ok' if ffmpeg else 'XX'}] ffmpeg    {ffmpeg or 'not found - install ffmpeg'}")
     ok &= bool(ffmpeg)
+
+    if ffmpeg:
+        encoders = available_encoders()
+        usable = [f.name for f in FORMATS if format_is_available(f)]
+        unusable = [f.name for f in FORMATS if not format_is_available(f)]
+        if not encoders:
+            print("[--] formats   could not query ffmpeg encoders; assuming all work")
+        elif unusable:
+            print(f"[--] formats   {', '.join(usable)} (missing: {', '.join(unusable)})")
+        else:
+            print(f"[ok] formats   all {len(usable)} formats available")
+        if metering_supported():
+            print("[ok] meter     live level meter available")
+        else:
+            print("[--] meter     this ffmpeg cannot run the meter filter; "
+                  "recording still works")
 
     pactl = shutil.which("pactl")
     print(f"[{'ok' if pactl else 'XX'}] pactl     {pactl or 'not found - install pulseaudio-utils or libpulse'}")

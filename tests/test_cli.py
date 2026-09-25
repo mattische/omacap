@@ -274,3 +274,60 @@ def test_an_unknown_vocabulary_is_rejected(capsys, recording):
     with pytest.raises(SystemExit):
         cli.main(["analyze", str(recording), "-c", "bebop"])
     assert "invalid choice" in capsys.readouterr().err
+
+
+# -- ffmpeg capability reporting -----------------------------------------
+
+def test_doctor_reports_the_available_formats(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setenv("OMACAP_OUTPUT_DIR", str(tmp_path / "recordings"))
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "formats" in out and "6 formats available" in out
+    assert "meter" in out
+
+
+def test_doctor_names_the_formats_this_ffmpeg_cannot_write(
+    capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "omacap.recorder.available_encoders", lambda: frozenset({"flac", "pcm_s16le"})
+    )
+    monkeypatch.setenv("OMACAP_OUTPUT_DIR", str(tmp_path / "recordings"))
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "missing: mp3" in out
+    assert "wav, flac" in out
+
+
+def test_doctor_warns_when_the_meter_is_unavailable(
+    capsys, stub_audio, ffmpeg_without_meter, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("OMACAP_OUTPUT_DIR", str(tmp_path / "recordings"))
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "cannot run the meter filter" in out
+    assert "recording still works" in out
+    # A missing meter is not a failed installation.
+    assert "Everything looks good" in out
+
+
+def test_formats_marks_what_this_ffmpeg_cannot_write(capsys, fake_ffmpeg, monkeypatch):
+    monkeypatch.setattr(
+        "omacap.recorder.available_encoders", lambda: frozenset({"flac", "pcm_s16le"})
+    )
+    cli.main(["formats"])
+    out = capsys.readouterr().out
+    assert "[unavailable in this ffmpeg build]" in out
+    assert "Unavailable here: mp3, m4a, opus, ogg" in out
+
+
+def test_recording_an_unavailable_format_fails_before_the_banner(
+    capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "omacap.recorder.available_encoders", lambda: frozenset({"flac", "pcm_s16le"})
+    )
+    assert cli.main(["record", "-d", "0.3", "-f", "mp3", "-D", str(tmp_path)]) == 1
+    captured = capsys.readouterr()
+    assert "cannot encode mp3" in captured.err
+    assert captured.out == ""

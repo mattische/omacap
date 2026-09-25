@@ -15,10 +15,11 @@ from pathlib import Path
 from . import ui
 from .chart import CHART_FORMATS, default_chart_path, write_chart
 from .devices import AudioSystemError, Source, list_monitors, resolve_source
-from .formats import AudioFormat, get_format, next_format
+from .formats import FORMATS, AudioFormat, get_format, next_format
 from .recorder import (
     METER_FLOOR_DB,
     Recorder,
+    format_is_available,
     RecorderConfig,
     RecorderError,
     build_output_path,
@@ -199,7 +200,17 @@ class TuiApp:
     def cycle_format(self, step: int = 1) -> None:
         if self.busy("Stop recording before changing the format."):
             return
-        self.audio_format = next_format(self.audio_format.name, step)
+        # Skip anything this ffmpeg build cannot encode, so the key never lands
+        # on a format that would refuse to record.
+        candidate = next_format(self.audio_format.name, step)
+        for _ in range(len(FORMATS)):
+            if format_is_available(candidate):
+                break
+            candidate = next_format(candidate.name, step)
+        else:
+            self.notify("No usable output formats in this ffmpeg build.", "error")
+            return
+        self.audio_format = candidate
         self.bitrate = self.audio_format.default_bitrate or self.bitrate
         self.notify(f"Format set to {self.audio_format.name}.")
 
