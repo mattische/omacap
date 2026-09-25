@@ -349,6 +349,34 @@ def test_a_collapsed_chordgrid_brackets_the_phrase_with_repeat_marks(analysis):
     assert any(":||" in l for l in rows)
 
 
+def test_the_repeat_count_is_written_the_way_the_plugin_parses_it(analysis):
+    r"""The chordgrid plugin reads a count with ``/^(:?\|\|)x(\d+)/``.
+
+    Anchored, lowercase x, no space. A count written any other way is dropped
+    silently and the chart renders as if the phrase were played once, so the
+    syntax is pinned here rather than trusted.
+    """
+    import re
+
+    from omacap.chart import chordgrid_lines
+
+    plugin = re.compile(r"^(:?\|\|)x(\d+)")
+    closes = [line.split()[-1] for line in chordgrid_lines(analysis)
+              if ":||" in line]
+    assert closes, "expected a collapsed phrase"
+    counts = [plugin.match(close) for close in closes]
+    assert all(counts), closes
+    assert all(int(m.group(2)) > 1 for m in counts)
+
+
+def test_a_chordgrid_never_writes_a_letter_inside_the_block(analysis):
+    # The plugin has no syntax for a section label, so the letters stay in the
+    # form line above the block.
+    from omacap.chart import chordgrid_lines
+
+    assert "\u00d7" not in "\n".join(chordgrid_lines(analysis))
+
+
 def test_the_form_is_named_above_the_chart(analysis):
     assert "Form: A" in render_markdown(analysis)
     assert "Form: A" in render_text(analysis)

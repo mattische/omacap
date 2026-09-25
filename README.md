@@ -533,8 +533,10 @@ Form: A×3 B×2 C×2 C×2 B×2 A×2 B×2 D×3.
 ```
 
 On one 139-bar recording that turns 35 rows into 22, and the `B` it finds is the
-chorus its players wrote down. In a `chordgrid` chart the same phrases come out
-bracketed by repeat marks, `||: ... :||`, which is how a chart says it anyway.
+chorus its players wrote down. In a `chordgrid` chart the same phrases come out bracketed by repeat marks with
+the count on the closing one, `||: ... :||x3`, which is both how a chart says it
+and the syntax the plugin parses. The letters stay in the form line, since the
+plugin has no notation for a section label.
 
 A phrase starts a new line, so a short one can cost more rows than writing it out
 twice would. When that happens omacap writes it out — the chart never comes back
@@ -557,7 +559,7 @@ measure-num
 4/4
 
 ||: C | Em | D | D |
-| C | Em | D | D :||   A×3
+| C | Em | D | D :||x3
 ```
 ````
 

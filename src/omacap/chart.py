@@ -59,16 +59,17 @@ def bar_text(bar, uncertain: set[int]) -> str:
 def _layout(analysis, bars_per_line: int, collapse: bool):
     """Group the bars into the rows a chart is written in.
 
-    Each row is (bar number or None, the bars on it, the note at its end, the
-    repeat mark). A phrase written more than once is given its own rows, a note
-    saying how often, and repeat marks around it: a long phrase spans several
-    rows, so the marks open on the first and close on the last.
+    Each row is (bar number or None, the bars on it, the phrase letter, how many
+    times to play it, the repeat mark). The letter and the count are passed on
+    raw rather than formatted, because the plain chart and the chordgrid write
+    them differently. A long phrase spans several rows, so the repeat marks open
+    on the first and close on the last.
     """
     from .analysis.structure import find_phrases
 
     bars = analysis.bars
     flat = [
-        (bars[i].number, bars[i: i + bars_per_line], "", "")
+        (bars[i].number, bars[i: i + bars_per_line], "", 0, "")
         for i in range(0, len(bars), bars_per_line)
     ]
     if not collapse:
@@ -80,7 +81,7 @@ def _layout(analysis, bars_per_line: int, collapse: bool):
     def flush():
         for i in range(0, len(loose), bars_per_line):
             chunk = loose[i: i + bars_per_line]
-            rows.append((chunk[0].number, chunk, "", ""))
+            rows.append((chunk[0].number, chunk, "", 0, ""))
         loose.clear()
 
     for phrase in find_phrases(bars):
@@ -88,7 +89,6 @@ def _layout(analysis, bars_per_line: int, collapse: bool):
             loose.extend(phrase.bars)
             continue
         flush()
-        note = f"{phrase.letter}\u00d7{phrase.repeats}".strip()
         pieces = [
             phrase.bars[i: i + bars_per_line]
             for i in range(0, phrase.length, bars_per_line)
@@ -99,7 +99,8 @@ def _layout(analysis, bars_per_line: int, collapse: bool):
             mark = ("both" if first and last
                     else "open" if first else "close" if last else "mid")
             rows.append((chunk[0].number if first else None, chunk,
-                         note if last else "", mark))
+                         phrase.letter if last else "",
+                         phrase.repeats if last else 0, mark))
     flush()
     # A phrase boundary breaks the line, so a short phrase can cost more rows
     # than writing it out twice would. When that happens, write it out.
@@ -108,7 +109,7 @@ def _layout(analysis, bars_per_line: int, collapse: bool):
 
 def _form_note(analysis, rows: list) -> list[str]:
     """One line naming the song's form, when the chart is written that way."""
-    if not any(note for _, _, note, _ in rows):
+    if not any(repeats for _, _, _, repeats, _ in rows):
         return []
     from .analysis.structure import find_phrases, form
 
@@ -131,7 +132,9 @@ def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE,
     width = max(max((len(t) for t in texts.values()), default=4), 6)
     number_width = len(str(len(bars)))
     rows = _layout(analysis, bars_per_line, collapse)
-    note_width = max((len(note) for _, _, note, _ in rows), default=0)
+    notes = [f"{letter}\u00d7{repeats}" if repeats else ""
+             for _, _, letter, repeats, _ in rows]
+    note_width = max((len(note) for note in notes), default=0)
 
     # A phrase boundary forces a line break, so some lines hold fewer bars than
     # others. They are padded with space rather than with empty cells, which would
@@ -140,7 +143,7 @@ def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE,
     full_row = cell_width * bars_per_line
 
     lines = []
-    for number, row, note, _ in rows:
+    for (number, row, _, _, _), note in zip(rows, notes):
         cells = "".join(f" {texts[bar.number].ljust(width)} |" for bar in row)
         label = "" if number is None else str(number)
         tail = f"  {note.ljust(note_width)}" if note_width else ""
@@ -162,15 +165,16 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
 
     uncertain = getattr(analysis, "uncertain_bars", set())
     lines = ["```chordgrid", "measure-num", "", analysis.meter.name, ""]
-    for _, row, note, mark in _layout(analysis, bars_per_line, collapse):
+    for _, row, _, repeats, mark in _layout(analysis, bars_per_line, collapse):
         cells = " | ".join(bar_text(bar, uncertain) for bar in row)
-        # Repeat marks are how a chart says this twice, and the count says how
-        # many times. A phrase wider than one row opens on the first and closes
-        # on the last, so the marks bracket the whole phrase.
+        # Repeat marks are how a chart says this twice. The count goes on the
+        # closing mark as "x3", with no space: that is the syntax the chordgrid
+        # plugin parses, and anything else loses the count silently.
         left = "||:" if mark in ("open", "both") else "|"
         right = ":||" if mark in ("close", "both") else "|"
-        tail = f"   {note}" if note else ""
-        lines.append(f"{left} {cells} {right}{tail}")
+        if repeats > 1 and right == ":||":
+            right += f"x{repeats}"
+        lines.append(f"{left} {cells} {right}")
     lines.append("```")
     return lines
 

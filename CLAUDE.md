@@ -96,6 +96,7 @@ the relevant tests; they encode the ground truth.
 | `analysis/report.py` | `DOMINANT_SHARE = 0.62` | A chord holding more than this much of a bar is written alone. |
 | `analysis/structure.py` | `PHRASE_LENGTHS = (8, 4)` | Phrase lengths looked for, longest first. Adding 2 made charts *longer*: a two-bar phrase saves one row and costs a line break at each end. Measured on five recordings, `(8, 4)` turned 35 rows into 22 on one and never made any of them worse. |
 | `chart.py` | collapsing falls back to flat | A phrase starts its own line, so a short one can cost more rows than writing it out twice. `_layout` builds both and returns the shorter, which makes "never longer" a property of the code rather than of the tuning. |
+| `chart.py` | chordgrid repeat count is `:||x3` | The plugin parses it with `/^(:?\|\|)x(\d+)/` - anchored, lowercase `x`, no space. Any other spelling is dropped silently and the phrase renders as if played once, which is why `tests/test_chart.py` pins the regex. The plugin has no notation for a section label, so the A/B letters stay in the form line above the block. |
 | `chart.py` | short rows padded with space, not empty cells | A phrase boundary leaves a row holding fewer than four bars. Padding it with `\|` cells would read as bars that are not there. |
 
 ## Traps already hit and fixed
