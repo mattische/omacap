@@ -14,6 +14,10 @@ venv/
 .coverage
 htmlcov/
 
+# Stray output if a test stub is ever handed an ffmpeg flag as a filename
+/-encoders
+/-*
+
 # Recordings must never be committed
 *.wav
 *.mp3
