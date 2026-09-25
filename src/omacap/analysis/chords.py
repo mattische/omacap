@@ -57,7 +57,21 @@ def get_vocabulary(name: str) -> tuple[str, ...]:
 #: How much better a different chord must correlate before the decoder is willing
 #: to switch to it. Expressed in correlation units, so it is directly comparable
 #: with the template scores.
-CHANGE_PENALTY = 0.06
+#:
+#: Harmonic rhythm is slower than the beat - most bars hold one chord, some two -
+#: so the prior against changing should be strong. Measured across five recordings,
+#: agreement with real charts is best anywhere from 0.20 to 0.30 and falls away
+#: past that, while a synthetic progression that genuinely changes every beat is
+#: still recognised perfectly up to 0.30 and breaks at 0.40. The middle of that
+#: usable range is taken rather than the peak of the measurement, which is well
+#: inside the noise of what a hand-written chart can settle.
+CHANGE_PENALTY = 0.25
+
+#: What the penalty is multiplied by when only the quality changes and the root
+#: stays put. Csus4 resolving to C, or C becoming C7, is not the harmony moving -
+#: it is the same chord voiced differently - and charging it as a full change makes
+#: the decoder refuse to hear a suspension resolve.
+SAME_ROOT_FRACTION = 0.3
 
 #: Correlation a chord must beat to be preferred over "no chord".
 NO_CHORD_SCORE = 0.38
@@ -174,14 +188,21 @@ def quality_penalties():
     )
 
 
-def viterbi(scores, change_penalty: float = CHANGE_PENALTY):
+def viterbi(
+    scores,
+    change_penalty: float = CHANGE_PENALTY,
+    same_root_fraction: float = SAME_ROOT_FRACTION,
+):
     """The chord path maximising total correlation minus a cost per change.
 
-    Chords are held unless a different one correlates at least ``change_penalty``
-    better, which stops the labels flickering between a chord and its relatives
-    from beat to beat. Because every change costs the same, the best predecessor
-    is either the same state or the best state overall, so each step is linear in
-    the number of chords rather than quadratic.
+    Chords are held unless a different one correlates enough better, which stops
+    the labels flickering between a chord and its relatives from beat to beat.
+    Moving to a different root costs the full penalty; staying on the same root
+    and changing only the quality costs a fraction of it, because that is the same
+    chord voiced differently rather than the harmony moving.
+
+    Each step stays linear in the number of chords: the best predecessor is the
+    same state, the best state sharing its root, or the best state overall.
     """
     np = require_numpy()
     scores = np.asarray(scores, dtype=np.float64)
@@ -189,15 +210,36 @@ def viterbi(scores, change_penalty: float = CHANGE_PENALTY):
         return np.array([], dtype=int)
     n_segments, n_states = scores.shape
 
+    # Every chord state's root; no-chord is given a group of its own so it gets no
+    # same-root discount with anything.
+    roots = np.arange(n_states) % 12
+    if n_states % 12 == 1:
+        roots[-1] = 12
+    n_groups = int(roots.max()) + 1
+    same_root_penalty = change_penalty * same_root_fraction
+
     best = scores[0].copy()
     backlink = np.zeros((n_segments, n_states), dtype=np.int64)
     states = np.arange(n_states)
     for index in range(1, n_segments):
-        previous_best = int(np.argmax(best))
-        from_switch = best[previous_best] - change_penalty
-        keep = best >= from_switch
-        backlink[index] = np.where(keep, states, previous_best)
-        best = np.where(keep, best, from_switch) + scores[index]
+        overall = int(np.argmax(best))
+        from_any = best[overall] - change_penalty
+
+        # Best predecessor within each root group, and which state that was.
+        group_best = np.full(n_groups, -np.inf)
+        group_where = np.zeros(n_groups, dtype=np.int64)
+        np.maximum.at(group_best, roots, best)
+        for group in range(n_groups):
+            members = states[roots == group]
+            group_where[group] = members[int(np.argmax(best[members]))]
+        from_root = group_best[roots] - same_root_penalty
+
+        candidates = np.stack([best, from_root, np.full(n_states, from_any)])
+        choice = np.argmax(candidates, axis=0)
+        backlink[index] = np.where(
+            choice == 0, states, np.where(choice == 1, group_where[roots], overall)
+        )
+        best = candidates[choice, states] + scores[index]
 
     path = np.zeros(n_segments, dtype=np.int64)
     path[-1] = int(np.argmax(best))

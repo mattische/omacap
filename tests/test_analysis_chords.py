@@ -220,3 +220,44 @@ def test_merging_joins_repeated_chords():
 
 def test_merging_an_empty_list():
     assert merge_adjacent([]) == []
+
+
+# -- how dearly a change costs --------------------------------------------
+
+def test_a_suspension_may_resolve_onto_its_own_root():
+    """Csus4 to C is the same chord voiced differently, not the harmony moving."""
+    got, wanted = recognise([(0, "sus4"), (0, ""), (0, "sus4"), (0, "")])
+    assert got == wanted
+
+
+def test_moving_to_another_root_costs_more_than_changing_quality():
+    """The same margin buys a quality change but not a root change.
+
+    The rival sits on the final segment, so the path pays to switch once and never
+    pays to come back.
+    """
+    from omacap.analysis.chords import CHANGE_PENALTY, SAME_ROOT_FRACTION, chord_labels
+
+    names = chord_labels()
+    margin = CHANGE_PENALTY * 0.5          # more than the same-root cost, less than a full change
+
+    def final_choice(rival: str) -> str:
+        scores = np.zeros((3, len(names)))
+        scores[:, names.index("C")] = 0.90
+        scores[-1, names.index(rival)] = 0.90 + margin
+        return names[list(viterbi(scores))[-1]]
+
+    assert final_choice("C7") == "C7", "a quality change on the same root should be taken"
+    assert final_choice("F") == "C", "a root change needs the full margin"
+    assert SAME_ROOT_FRACTION < 1.0
+
+
+def test_no_chord_gets_no_same_root_discount():
+    """No-chord shares a root with nothing, so reaching it costs the full change."""
+    from omacap.analysis.chords import CHANGE_PENALTY, chord_labels
+
+    names = chord_labels()
+    scores = np.zeros((3, len(names)))
+    scores[:, names.index("C")] = 0.90
+    scores[1, -1] = 0.90 + CHANGE_PENALTY * 0.5      # no-chord, a modest margin
+    assert names[list(viterbi(scores))[1]] == "C"
