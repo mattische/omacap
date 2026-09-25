@@ -506,7 +506,19 @@ Detected: **time signature** (4/4, 3/4, 6/8, 5/4, 7/8), **key** (all 24 major an
 minor keys, with the key signature), **tempo** in BPM, the **number of bars**, and
 the **chords in each bar**.
 
-Every chart carries a confidence line — `key high, tempo high, time signature
+Where a judgement was a close call, the chart says so on the line itself:
+
+```
+| **Key**            | G major (1 sharp) — or E minor, its relative              |
+| **Time signature** | 7/8 — a close call, so the bars may be grouped wrongly    |
+```
+
+A key and its relative minor share every note, so when the evidence cannot separate
+them both are named rather than one being asserted. And a time signature chosen on a
+thin margin is worth knowing about, because the bar grouping is built on it: if it is
+wrong, every bar is, however good the chords are.
+
+Every chart also carries a confidence line — `key high, tempo high, time signature
 low` — because some of this is genuinely ambiguous:
 
 - **Relative keys.** A minor and C major use identical notes. omacap decides

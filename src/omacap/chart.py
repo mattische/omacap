@@ -63,14 +63,32 @@ def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE) -> list[str]:
     return lines
 
 
+#: Below this, a detection is reported as a choice rather than a fact.
+CERTAIN = 0.75
+
+
 def summary_rows(analysis) -> list[tuple[str, str]]:
-    """The facts that head the chart, as label/value pairs."""
+    """The facts that head the chart, as label/value pairs.
+
+    Where a judgement was a close call, it is written as one. A chart that hides
+    its uncertainty is worse than one that admits it: the reader cannot tell which
+    lines to check.
+    """
     key = analysis.key
     meter = analysis.meter
+
+    key_text = f"{key.name} ({key.signature})"
+    if key.confidence < CERTAIN:
+        key_text += f" \u2014 or {key.relative.name}, its relative"
+
+    meter_text = meter.name
+    if meter.confidence < CERTAIN:
+        meter_text += " \u2014 a close call, so the bars may be grouped wrongly"
+
     return [
-        ("Key", f"{key.name} ({key.signature})"),
+        ("Key", key_text),
         ("Tempo", f"{analysis.tempo:.0f} BPM"),
-        ("Time signature", meter.name),
+        ("Time signature", meter_text),
         ("Bars", str(analysis.bar_count)),
         ("Length", format_clock(analysis.duration)),
         ("Chords used", ", ".join(analysis.chord_vocabulary) or "none"),

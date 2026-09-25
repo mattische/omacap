@@ -171,3 +171,28 @@ def test_out_of_key_chords_count_against_it():
 
 def test_evidence_without_chords_is_zero():
     assert chord_evidence([], 0, "major") == 0.0
+
+
+# -- the relative key ------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "tonic,mode,expected",
+    [(7, "major", "E minor"), (4, "minor", "G major"), (0, "major", "A minor"),
+     (9, "minor", "C major"), (3, "major", "C minor"), (2, "minor", "F major")],
+)
+def test_the_relative_key(tonic, mode, expected):
+    assert Key(tonic, mode, 0.9, 0.5).relative.name == expected
+
+
+def test_a_key_and_its_relative_share_a_signature():
+    """That is exactly why they cannot be told apart by pitch content."""
+    for tonic in range(12):
+        for mode in ("major", "minor"):
+            key = Key(tonic, mode, 0.9, 0.5)
+            assert key.signature == key.relative.signature
+
+
+def test_the_relative_of_the_relative_is_the_original():
+    for tonic in range(12):
+        key = Key(tonic, "major", 0.9, 0.5)
+        assert key.relative.relative.name == key.name

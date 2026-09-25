@@ -42,6 +42,18 @@ class Key:
         return spelling[self.tonic] + ("" if self.mode == "major" else "m")
 
     @property
+    def relative(self) -> "Key":
+        """The relative major or minor, which shares every note with this key.
+
+        The two cannot be told apart by pitch content at all - only by which
+        chord behaves as home - so when the choice was a close one, naming the
+        other is more use than insisting on one.
+        """
+        if self.mode == "major":
+            return Key((self.tonic + 9) % 12, "minor", self.correlation, self.confidence)
+        return Key((self.tonic + 3) % 12, "major", self.correlation, self.confidence)
+
+    @property
     def signature(self) -> str:
         """The key signature, e.g. ``2 sharps`` or ``3 flats``."""
         relative_major = self.tonic if self.mode == "major" else (self.tonic + 3) % 12

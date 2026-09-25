@@ -171,3 +171,54 @@ def test_writing_plain_text(analysis, tmp_path):
     target = tmp_path / "song.txt"
     write_chart(analysis, target, "txt")
     assert "```" not in target.read_text(encoding="utf-8")
+
+
+# -- saying what was a close call -----------------------------------------
+
+class _Stub:
+    """Enough of an Analysis to render the summary."""
+
+    def __init__(self, key_conf=1.0, meter_conf=1.0):
+        from omacap.analysis.key import Key
+        from omacap.analysis.meter import Meter
+
+        self.key = Key(7, "major", 0.9, key_conf)
+        self.meter = Meter(4, 0, "4/4", meter_conf)
+        self.tempo = 120.0
+        self.duration = 60.0
+        self.bars = []
+        self.bar_count = 0
+        self.tempo_confidence = 1.0
+        self.source = Path("take.wav")
+        self.chord_vocabulary = []
+
+
+def test_a_confident_key_is_stated_plainly():
+    rows = dict(summary_rows(_Stub(key_conf=1.0)))
+    assert rows["Key"] == "G major (1 sharp)"
+    assert "relative" not in rows["Key"]
+
+
+def test_an_uncertain_key_names_its_relative():
+    """A key and its relative share every note, so naming one alone hides a coin flip."""
+    rows = dict(summary_rows(_Stub(key_conf=0.5)))
+    assert rows["Key"].startswith("G major (1 sharp)")
+    assert "E minor" in rows["Key"]
+
+
+def test_a_confident_time_signature_is_stated_plainly():
+    rows = dict(summary_rows(_Stub(meter_conf=1.0)))
+    assert rows["Time signature"] == "4/4"
+
+
+def test_an_uncertain_time_signature_says_the_bars_may_be_wrong():
+    rows = dict(summary_rows(_Stub(meter_conf=0.1)))
+    assert rows["Time signature"].startswith("4/4")
+    assert "grouped wrongly" in rows["Time signature"]
+
+
+def test_the_threshold_is_where_the_wording_of_confidence_changes():
+    from omacap.chart import CERTAIN, confidence_word
+
+    assert confidence_word(CERTAIN) == "high"
+    assert confidence_word(CERTAIN - 0.01) != "high"

@@ -129,6 +129,30 @@ Worth knowing so they are not reintroduced:
   `(trackid, title, artist)`. Spotify's desktop client does move the id, which is
   why this went unnoticed until the same playlist was played in a browser.
 
+## About the real-chart ground truth
+
+The band's own charts are the best ground truth available, but they are what the
+band *plays*, not a transcription of the take: a chart may write `D` where the
+recording has `D/B`, simplify a passing chord, or predate an arrangement change.
+So the agreement figures below are a **lower bound**, and disagreement is not
+always omacap being wrong.
+
+That matters for how to use them. They are sound for judging whether a change
+helps or hurts, since the same bias applies before and after. They are not sound
+as a target to maximise: a change that raises agreement without a reason grounded
+in how the audio or the maths works is more likely to be fitting the charts'
+quirks than hearing the music better.
+
+## Ideas that were tried and did not help
+
+**Falling back to 4/4 when the metre was a close call.** The idea was that a metre
+chosen on a thin margin should defer to the commonest one. Measuring the margin as
+best-over-runner-up ratio killed it: correct synthetic 3/4 scores 1.13 and correct
+6/8 scores 1.78, while the real recording whose 7/8 looks wrong scores 1.68. No
+threshold separates them, so the rule would trade working 3/4 and 6/8 detection for
+a 4/4 bias. The metre is instead reported as a close call, which cannot make the
+detection worse.
+
 ## Chroma ideas that were tried and did not help
 
 Measured against a real band recording with the band's own chord chart as ground
