@@ -148,9 +148,24 @@ def build_output_path(
     return candidate
 
 
+#: Punctuation kept in a filename. Track titles are full of brackets, ampersands
+#: and apostrophes - "Kärlek & Kaos", "Sång nr. 3 [Live]", "What's Going On" - and
+#: replacing those with underscores makes a chart folder unreadable. Everything
+#: else, path separators and shell globs included, is replaced.
+_ALLOWED_PUNCTUATION = r"\-.,&'()\[\]!+ "
+_DISALLOWED = re.compile(rf"[^\w{_ALLOWED_PUNCTUATION}]+")
+
+
 def sanitize_basename(name: str) -> str:
-    """Strip path separators and awkward characters out of a user-typed name."""
-    cleaned = re.sub(r"[^\w\-. ]+", "_", name.strip()).strip(" .")
+    r"""Strip path separators and awkward characters out of a name.
+
+    ``\w`` is Unicode-aware, so accented and non-Latin letters survive; only
+    characters that would confuse a filesystem are replaced. A replacement left
+    at the end is dropped - a title ending in "?" should not leave a trailing
+    underscore - but one at the start is kept, so "../x" cannot come back as a
+    name beginning with a dot.
+    """
+    cleaned = _DISALLOWED.sub("_", name.strip()).strip(" .").rstrip("_ .")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned or "omacap"
 

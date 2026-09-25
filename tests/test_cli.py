@@ -667,3 +667,71 @@ def test_doctor_flags_running_a_different_copy_than_path_would(capsys, stub_audi
     out = capsys.readouterr().out
     assert "conflict" in out
     assert str(running) in out and str(on_path) in out
+
+
+# -- nowplaying ------------------------------------------------------------
+
+def test_nowplaying_reports_the_current_track(capsys, busctl):
+    from conftest import mpris_track
+
+    busctl(metadata=[mpris_track(
+        "/com/spotify/track/abc",
+        title="Jag vill vara (en del av din morgondag)",
+        artist=["trampe|strandberg"],
+        album="det är din stund på jorden",
+        number=8, length=226818000,
+    )], status="Playing", position=118000000)
+
+    assert cli.main(["nowplaying"]) == 0
+    out = capsys.readouterr().out
+    assert "org.mpris.MediaPlayer2.spotify" in out
+    assert "Jag vill vara (en del av din morgondag)" in out
+    assert "trampe|strandberg" in out
+    assert "Playing" in out
+    assert "118 s of 227 s" in out and "109 s remaining" in out
+
+
+def test_nowplaying_shows_the_filename_it_would_use(capsys, busctl):
+    from conftest import mpris_track
+
+    busctl(metadata=[mpris_track("/t/1", title="What's Going On?", artist=["Marvin"])])
+    cli.main(["nowplaying"])
+    out = capsys.readouterr().out
+    # Readable, and free of the characters that would confuse a filesystem.
+    assert "01 - Marvin - What's Going On" in out
+
+
+def test_nowplaying_flags_an_advert(capsys, busctl):
+    from conftest import mpris_track
+
+    busctl(metadata=[mpris_track("/com/spotify/ad/1", title="Some Ad")])
+    cli.main(["nowplaying"])
+    assert "advert" in capsys.readouterr().out
+
+
+def test_nowplaying_when_no_player_is_running(capsys, busctl):
+    busctl(players=[])
+    assert cli.main(["nowplaying"]) == 1
+    assert "No media player" in capsys.readouterr().out
+
+
+def test_nowplaying_lists_the_players_when_the_named_one_is_absent(capsys, busctl):
+    busctl(players=["org.mpris.MediaPlayer2.mpv"])
+    assert cli.main(["nowplaying", "-p", "org.mpris.MediaPlayer2.spotify"]) == 1
+    err = capsys.readouterr().err
+    assert "no player called" in err
+    assert "org.mpris.MediaPlayer2.mpv" in err
+
+
+def test_nowplaying_mentions_other_players(capsys, busctl):
+    from conftest import mpris_track
+
+    busctl(players=["org.mpris.MediaPlayer2.spotify", "org.mpris.MediaPlayer2.mpv"],
+           metadata=[mpris_track("/t/1", title="One")])
+    cli.main(["nowplaying"])
+    assert "also running" in capsys.readouterr().out
+
+
+def test_nowplaying_without_busctl(capsys, no_busctl):
+    assert cli.main(["nowplaying"]) == 1
+    assert "busctl" in capsys.readouterr().err

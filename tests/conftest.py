@@ -7,6 +7,7 @@ while staying reproducible.
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import sys
@@ -201,6 +202,111 @@ def failing_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture
 def no_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     empty = tmp_path / "emptybin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
+
+#: A scriptable stand-in for busctl. A scenario file drives it, so a test can
+#: hand the watcher a sequence of tracks without a media player or a session bus.
+FAKE_BUSCTL = r'''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+
+state = Path(os.environ["OMACAP_TEST_BUSCTL"])
+scenario = json.loads(state.read_text())
+args = sys.argv[1:]
+
+if "list" in args:
+    for name in scenario.get("players", []):
+        print(f"{name} 1 proc user :1.1 session.scope - -")
+    sys.exit(0)
+
+if "get-property" not in args:
+    sys.exit(1)
+prop = args[-1]
+player = args[args.index("get-property") + 1]
+if player not in scenario.get("players", []):
+    print("no such name", file=sys.stderr)
+    sys.exit(1)
+
+if scenario.get("fail"):
+    sys.exit(1)
+if scenario.get("garbage"):
+    print("this is not json")
+    sys.exit(0)
+
+if prop == "Metadata":
+    steps = scenario.get("metadata", [])
+    cursor = state.with_suffix(".cursor")
+    index = int(cursor.read_text()) if cursor.exists() else 0
+    if not steps:
+        print(json.dumps({"type": "a{sv}", "data": {}}))
+        sys.exit(0)
+    entry = steps[min(index, len(steps) - 1)]
+    if index < len(steps) - 1:
+        cursor.write_text(str(index + 1))
+    print(json.dumps({"type": "a{sv}", "data": entry}))
+elif prop == "PlaybackStatus":
+    print(json.dumps({"type": "s", "data": scenario.get("status", "Playing")}))
+elif prop == "Position":
+    print(json.dumps({"type": "x", "data": scenario.get("position", 0)}))
+else:
+    sys.exit(1)
+'''
+
+
+def _variant(value):
+    """Wrap a python value the way busctl wraps a D-Bus variant."""
+    if isinstance(value, bool):
+        return {"type": "b", "data": value}
+    if isinstance(value, int):
+        return {"type": "x", "data": value}
+    if isinstance(value, list):
+        return {"type": "as", "data": value}
+    return {"type": "s", "data": value}
+
+
+def mpris_track(trackid, title="", artist=None, album="", number=None, length=None):
+    """One metadata reply, shaped exactly as busctl returns it."""
+    entry = {"mpris:trackid": _variant(trackid)}
+    if title:
+        entry["xesam:title"] = _variant(title)
+    if artist is not None:
+        entry["xesam:artist"] = _variant(artist)
+    if album:
+        entry["xesam:album"] = _variant(album)
+    if number is not None:
+        entry["xesam:trackNumber"] = _variant(number)
+    if length is not None:
+        entry["mpris:length"] = _variant(length)
+    return entry
+
+
+@pytest.fixture
+def busctl(tmp_path, monkeypatch):
+    """Install a scriptable busctl and return a setter for the scenario."""
+    bindir = tmp_path / "busbin"
+    bindir.mkdir()
+    _install(bindir, "busctl", FAKE_BUSCTL)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    state = tmp_path / "scenario.json"
+    monkeypatch.setenv("OMACAP_TEST_BUSCTL", str(state))
+
+    def configure(**scenario):
+        scenario.setdefault("players", ["org.mpris.MediaPlayer2.spotify"])
+        state.write_text(json.dumps(scenario))
+        cursor = state.with_suffix(".cursor")
+        if cursor.exists():
+            cursor.unlink()
+        return state
+
+    configure()
+    return configure
+
+
+@pytest.fixture
+def no_busctl(tmp_path, monkeypatch):
+    empty = tmp_path / "nobus"
     empty.mkdir()
     monkeypatch.setenv("PATH", str(empty))
 

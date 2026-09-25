@@ -1,6 +1,8 @@
 # Plan: split a playlist capture into one file per track
 
-Status: **planned, nothing implemented.** Written 2026-09-25.
+Status: **phase 1 done.** `nowplaying.py` and `omacap nowplaying` are built, and
+the offset below has been measured against a real Spotify client. Phases 2-4
+are still to do. Written 2026-09-25.
 
 The idea: while recording a streaming playlist, read what the player says is
 playing, and at the end cut the single capture into one file per track, named
@@ -84,11 +86,15 @@ is entirely table-testable without any audio.
 ```
 for each new trackid on the timeline:
     t = the observation's time within the recording
-    candidate = the nearest silence whose midpoint is within ±3 s of t
-    boundary  = that midpoint, if a candidate exists
-                otherwise t          (crossfade or gapless: cut straight)
+    gap = the silence interval containing t          (the measured common case)
+          else the nearest silence within ±3 s of t
+    boundary = the middle of gap, if there is one
+               otherwise t                            (crossfade or gapless)
 segment = previous boundary .. next boundary, trimmed to the silence edges
 ```
+
+The containment test comes first because that is what actually happens: the
+measurement below found the signal arriving 1.78 s into a 2.45 s gap.
 
 **The rule that matters: silence never splits on its own. Only a changed
 `trackid` does.** Silence is used solely to snap a boundary into place. That is
@@ -104,8 +110,8 @@ what protects the two common cases:
 
 `01 - trampe|strandberg - Jag vill vara (en del av din morgondag).flac`
 
-**This needs `sanitize_basename()` fixed first.** As it stands it mangles
-ordinary track titles:
+**`sanitize_basename()` has been fixed** (it used to mangle ordinary track
+titles). It previously produced:
 
 | Title | Current result |
 | --- | --- |
@@ -114,9 +120,12 @@ ordinary track titles:
 | `Sång nr. 3 [Live]` | `Sång nr. 3 _Live_` |
 | `What's Going On?` | `What_s Going On_` |
 
-Swedish letters are fine (`\w` is Unicode-aware, so `åäöÅÄÖéü` survive). A wider
-allow-list — `[^\w\-.,&'()\[\]!?+ ]` — keeps titles readable and still strips
-path separators (`../../etc/passwd` → `_.._etc_passwd`, `a/b\c` → `a_b_c`).
+Swedish letters were always fine (`\w` is Unicode-aware). The allow-list now keeps
+`-.,&'()[]!+` and a space, so `Jag vill vara (en del av din morgondag)` survives
+intact and `What's Going On?` becomes `What's Going On`. Path separators and shell
+globs are still replaced (`../../etc/passwd` → `_.._etc_passwd`, `a/b\c` → `a_b_c`),
+and a replacement left at the end is trimmed while one at the start is kept, so a
+traversal attempt cannot come back as a name beginning with a dot.
 
 Without MPRIS, fall back to `track 01`.
 
@@ -187,7 +196,7 @@ The project's existing patterns fit this directly.
 
 | Phase | Delivers | De-risks |
 | --- | --- | --- |
-| **1** | `nowplaying.py` + `omacap nowplaying` | **Measures the D-Bus-to-audio delay** — the one unknown. Runnable in a minute. |
+| **1** ✅ | `nowplaying.py` + `omacap nowplaying` | Done. The D-Bus-to-audio delay is measured; see below. |
 | **2** | silence events + `omacap split FILE` | Useful on its own, independent of MPRIS |
 | **3** | live timeline + `record --split` with names | The feature itself |
 | **4** | per-segment analysis, TUI prompt, auto-stop | The convenience |
@@ -195,56 +204,39 @@ The project's existing patterns fit this directly.
 Phase 1 comes first deliberately: it measures the delay *before* anything is
 built on top of assuming it.
 
-## The one open risk
+## The offset, measured
 
-How far Spotify's `PropertiesChanged` leads or lags the audio has **not** been
-measured — it needs Spotify running. Buffering suggests tens to hundreds of
-milliseconds. Snapping to silence makes it irrelevant whenever there is a gap;
-with crossfade enabled it becomes the only boundary, and segments could be off by
-up to half a second.
+This was the open risk. It is now settled, against a real Spotify client playing a
+playlist across a track boundary, captured with `tools/measure_mpris_offset.py`:
 
-### How to measure it (phase 1)
-
-`tools/measure_mpris_offset.py` does this. Run it on the machine where the player
-runs, with a playlist playing across at least one track boundary:
-
-```bash
-python tools/measure_mpris_offset.py --duration 90
+```
+[silence]  89.79s  start
+[track ]   91.57s  Mister Jensens evangelium
+[silence]  92.24s  end
 ```
 
-It pairs each track change with the nearest silence and prints the offset. It has
-been validated against mpv, where the signal arrived 50-140 ms *before* the audio;
-a streaming client buffers more, so expect a larger figure.
+| | |
+| --- | --- |
+| Gap Spotify left between tracks | **2.45 s of silence** |
+| MPRIS signal, relative to the audio stopping | 1.78 s after |
+| MPRIS signal, relative to the next track starting | 0.67 s before |
 
-The equivalent by hand, if you would rather see the raw streams:
+**The signal lands inside the gap.** That makes the boundary unambiguous and
+simplifies the rule: rather than "the nearest silence within ±3 s", prefer **the
+silence interval that contains the signal**, and fall back to the nearest one only
+when the signal falls outside every gap (crossfade, gapless).
 
-```bash
-# terminal 1 — silence events, in recording time
-ffmpeg -hide_banner -nostdin -nostats -loglevel info \
-  -f pulse -i "$(pactl get-default-sink).monitor" \
-  -af silencedetect=noise=-60dB:d=0.3 \
-  -ac 2 -ar 48000 -c:a pcm_s16le -t 120 -y /tmp/probe.wav 2>&1 >/dev/null \
-  | awk '/silence_(start|end)/ { "date +%s.%N" | getline t; close("date +%s.%N"); print t, $0 }'
+Two things worth knowing that the synthetic tests did not show:
 
-# terminal 2 — MPRIS track changes, in wall clock
-# The explicit flushes matter: without them awk and python buffer, and the
-# pipeline looks like it is doing nothing.
-while sleep 0.25; do
-  busctl --user --json=short get-property org.mpris.MediaPlayer2.spotify \
-    /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player Metadata 2>/dev/null \
-    | python3 -c 'import json,sys,time
-try: d = json.load(sys.stdin)["data"]
-except Exception: sys.exit()
-print(time.time(), d.get("mpris:trackid",{}).get("data"), d.get("xesam:title",{}).get("data"), flush=True)'
-done | awk '$2 != last { print; fflush(); last = $2 }'
-```
+- **Spotify does leave a gap** — 2.45 s here, with no crossfade configured. That is
+  far more generous than the 0.8 s the threshold sweep was tuned against.
+- **The gap is not perfect digital silence.** It measured **−70 dB**, not the −91 dB
+  a synthetic gap gives, because a filter-chain sink sat in the path. Music either
+  side was −28.8 dB and −15.3 dB. So −60 dB still separates them cleanly, but the
+  real margin is nearer 10 dB than 40, and the threshold should not be raised.
 
-Both snippets were run against a live MPRIS player; the second emits one line per
-distinct `trackid`.
-
-Compare the wall-clock time of a trackid change against the wall-clock time of
-the neighbouring `silence_start`/`silence_end`. That difference is the offset to
-correct for.
+This is one boundary on one playlist. Crossfade, Automix and gapless albums remain
+untested, and each removes the gap by design.
 
 ## Estimated size
 

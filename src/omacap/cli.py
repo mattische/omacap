@@ -7,9 +7,11 @@ import shutil
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 from . import __version__
+from . import nowplaying
 from .analysis import AnalysisUnavailable
 from .analysis.audio import DecodeError
 from .analysis.report import AnalysisError
@@ -29,6 +31,7 @@ from .analysis.chords import DEFAULT_VOCABULARY, VOCABULARIES
 from .formats import DEFAULT_FORMAT, FORMAT_NAMES, FORMATS, get_format
 from .recorder import (
     Recorder,
+    sanitize_basename,
     RecorderConfig,
     RecorderError,
     available_encoders,
@@ -58,6 +61,7 @@ examples:
   omacap analyze song.mp3       write a chord chart next to the recording
   omacap record -d 60 -A        record a minute, then chart it straight away
   omacap update                 install the latest version
+  omacap nowplaying             show what the media player is playing
 """
 
 
@@ -147,6 +151,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="only report whether an update is available",
     )
 
+    watching = subparsers.add_parser(
+        "nowplaying",
+        help="show what the media player says is playing",
+        description=(
+            "Read the current track over MPRIS. This is the source omacap uses "
+            "to name and split a playlist recording."
+        ),
+    )
+    watching.add_argument(
+        "-p", "--player", metavar="NAME",
+        help="MPRIS bus name (default: Spotify if running, else the first player)",
+    )
+    watching.add_argument(
+        "-w", "--watch", action="store_true",
+        help="keep running and print each track change",
+    )
+
     subparsers.add_parser("devices", help="list capture sources")
     subparsers.add_parser("formats", help="list output formats")
     subparsers.add_parser("doctor", help="check the installation")
@@ -218,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_analyze(args)
         if args.command == "update":
             return cmd_update(args)
+        if args.command == "nowplaying":
+            return cmd_nowplaying(args)
         return cmd_tui(args)
     except (AudioSystemError, RecorderError, AnalysisError, AnalysisUnavailable,
             DecodeError, ValueError) as exc:
@@ -429,6 +452,73 @@ def print_update_notice() -> None:
         return
     if status is not None:
         print(f"omacap: {notice_line(status)}", file=sys.stderr)
+
+
+def cmd_nowplaying(args: argparse.Namespace) -> int:
+    if not nowplaying.available():
+        print(
+            "omacap: 'busctl' was not found, so omacap cannot read what is "
+            "playing. It ships with systemd.",
+            file=sys.stderr,
+        )
+        return 1
+
+    players = nowplaying.list_players()
+    if not players:
+        print("No media player is publishing on the session bus.")
+        print("Start one and press play, then try again.")
+        return 1
+
+    player = nowplaying.find_player(args.player)
+    if player is None:
+        print(f"omacap: no player called {args.player!r}. Running now:",
+              file=sys.stderr)
+        for name in players:
+            print(f"  {name}", file=sys.stderr)
+        return 1
+
+    print(f"player   {player}")
+    if len(players) > 1:
+        print(f"         (also running: {', '.join(n for n in players if n != player)})")
+    _print_track(player)
+
+    if not args.watch:
+        return 0
+
+    print("\nwatching for track changes; press Ctrl-C to stop")
+    watcher = nowplaying.TrackWatcher(player, clock=time.monotonic)
+    seen = 0
+    try:
+        while True:
+            change = watcher.poll_once()
+            if change is not None:
+                seen += 1
+                marker = "  (advert)" if change.track.is_advert else ""
+                print(f"  {seen:02d}  {change.track.label}{marker}")
+            time.sleep(nowplaying.POLL_SECONDS)
+    except KeyboardInterrupt:
+        print(f"\n{seen} track change(s) seen.")
+    return 0
+
+
+def _print_track(player: str) -> None:
+    track = nowplaying.current_track(player)
+    status = nowplaying.playback_status(player)
+    print(f"status   {status or 'unknown'}")
+    if track is None:
+        print("track    nothing reported")
+        return
+    print(f"artist   {track.artist or '-'}")
+    print(f"title    {track.title or '-'}")
+    print(f"album    {track.album or '-'}")
+    if track.length:
+        elapsed = nowplaying.position(player)
+        print(f"position {elapsed:.0f} s of {track.length:.0f} s "
+              f"({max(0.0, track.length - elapsed):.0f} s remaining)")
+    print(f"trackid  {track.trackid}")
+    print(f"filename {sanitize_basename(track.filename(1))}")
+    if track.is_advert:
+        print("         this looks like an advert, not a track")
 
 
 def cmd_devices() -> int:
