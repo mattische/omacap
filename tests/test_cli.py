@@ -1035,3 +1035,32 @@ def test_the_watchdog_can_be_switched_off_while_splitting(capsys, stub_audio, fa
     cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-S",
               "--stop-after-silence", "0"])
     assert "30s of silence" not in capsys.readouterr().out
+
+
+# -- clipping --------------------------------------------------------------
+
+def test_record_reports_the_peak_level(capsys, stub_audio, fake_ffmpeg, tmp_path):
+    cli.main(["record", "-d", "0.5", "-f", "wav", "-D", str(tmp_path)])
+    assert "peak " in capsys.readouterr().out
+
+
+def test_a_clipped_recording_is_warned_about(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setenv("OMACAP_TEST_LOUD", "1")
+    assert cli.main(["record", "-d", "1.0", "-f", "wav", "-D", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    assert "clipped" in captured.err
+    assert "sink-input-volume" in captured.err
+    assert "saved" in captured.out          # the recording is still fine to keep
+
+
+def test_an_ordinary_recording_gets_no_warning(capsys, stub_audio, fake_ffmpeg, tmp_path):
+    cli.main(["record", "-d", "0.5", "-f", "wav", "-D", str(tmp_path)])
+    assert "clipped" not in capsys.readouterr().err
+
+
+def test_quiet_mode_still_warns_on_stderr(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setenv("OMACAP_TEST_LOUD", "1")
+    cli.main(["record", "-d", "1.0", "-f", "wav", "-D", str(tmp_path), "-q"])
+    captured = capsys.readouterr()
+    assert "clipped" in captured.err
+    assert Path(captured.out.strip()).is_file()      # stdout is still just a path

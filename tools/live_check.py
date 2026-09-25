@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import json
 import os
 import re
 import select
@@ -63,6 +64,25 @@ def audio_env() -> dict[str, str]:
     env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
     env["TERM"] = "xterm-256color"
     return env
+
+
+def other_playback(env) -> list[str]:
+    """Applications already playing, which would be mixed into the capture."""
+    result = subprocess.run(["pactl", "--format=json", "list", "sink-inputs"],
+                            capture_output=True, text=True, env=env)
+    try:
+        streams = json.loads(result.stdout)
+    except Exception:
+        return []
+    names = []
+    for stream in streams:
+        if stream.get("corked"):
+            continue
+        props = stream.get("properties", {})
+        name = props.get("application.name") or props.get("application.process.binary")
+        if name and name.lower() not in ("ffmpeg", "lavf", "omacap"):
+            names.append(name)
+    return sorted(set(names))
 
 
 def default_sink(env) -> str:
@@ -266,7 +286,7 @@ def check_tui(checks: Checks, out_dir: Path, music: Path | None, env,
     checks.add("recording started", "REC" in tui.screen())
     player = play(music, 16.0, env)
     tui.pump(4.0)
-    metered = re.search(r"-\s?\d+\.\d dB", tui.screen())
+    metered = re.search(r"-?\s?\d+\.\d dB", tui.screen())
     checks.add("the level meter shows live audio", metered is not None,
                metered.group(0) if metered else "meter stayed silent")
     player.wait()
@@ -330,6 +350,11 @@ def main() -> int:
             return 2
 
     env = audio_env()
+    busy = other_playback(env)
+    if busy:
+        print(f"note   something else is already playing ({', '.join(busy)}).")
+        print("       It shares the output, so it will be mixed into the capture")
+        print("       and the levels and chord chart will reflect both.\n")
     env["PYTHONPATH"] = str(REPO_ROOT / "src") + os.pathsep + env.get("PYTHONPATH", "")
     out_dir = Path(tempfile.mkdtemp(prefix="omacap-live-"))
     print(f"omacap live check\noutput: {out_dir}")

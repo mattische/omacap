@@ -29,6 +29,8 @@ class FakeRecorder:
         self.is_running = False
         self.stopped = False
         self.silences: list = []
+        self.clipping = False
+        self.peak_hold = -60.0
         FakeRecorder.instances.append(self)
 
     def start(self):
@@ -808,3 +810,39 @@ def test_a_player_found_at_startup_is_not_looked_up_again(app, monkeypatch):
                         lambda name: pytest.fail("already known"))
     press(app, " ")
     assert app.player == "org.mpris.MediaPlayer2.mpv"
+
+
+# -- clipping --------------------------------------------------------------
+
+def test_clipping_is_shown_while_recording(app):
+    press(app, " ")
+    app.recorder.clipping = True
+    vm = app.view_model()
+    assert vm.clipping is True
+    assert "clipping" in "\n".join(tui.ui.render(vm, 76, use_color=False))
+
+
+def test_nothing_is_shown_when_the_level_is_fine(app):
+    press(app, " ")
+    app.recorder.clipping = False
+    assert app.view_model().clipping is False
+
+
+def test_a_clipped_result_is_reported_as_a_problem(app, monkeypatch):
+    press(app, " ")
+    recorder = app.recorder
+    original = recorder.stop
+
+    def clipped_stop(timeout=8.0):
+        result = original(timeout)
+        return type(result)(
+            path=result.path, duration=result.duration,
+            size_bytes=result.size_bytes, format_name=result.format_name,
+            peak_db=-0.02, clipped=True,
+        )
+
+    recorder.stop = clipped_stop
+    press(app, " ")
+    assert app.message_kind == "error"
+    assert "clipped" in app.message
+    assert "-0.0 dB" in app.message

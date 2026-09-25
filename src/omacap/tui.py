@@ -107,6 +107,7 @@ class TuiApp:
             elapsed=recorder.duration if active else 0.0,
             size_bytes=recorder.size_bytes if active else 0,
             meter_db=self.meter_db,
+            clipping=bool(recorder is not None and active and recorder.clipping),
             next_name=self.next_name,
             analyse_prompt=self.analyse_prompt,
             split_prompt=self.split_prompt,
@@ -204,12 +205,20 @@ class TuiApp:
                 f"{result.path.name}   {ui.format_duration(result.duration)}"
                 f"   {ui.format_size(result.size_bytes)}"
             )
-            self.notify(
-                f"Saved {result.path.name}"
-                f" ({ui.format_duration(result.duration)},"
-                f" {ui.format_size(result.size_bytes)})",
-                "success",
-            )
+            if result.clipped:
+                self.notify(
+                    f"Saved {result.path.name}, but it clipped — "
+                    f"peaked at {result.peak_db:.1f} dB. Lower the "
+                    f"application's volume, not the speakers.",
+                    "error",
+                )
+            else:
+                self.notify(
+                    f"Saved {result.path.name}"
+                    f" ({ui.format_duration(result.duration)},"
+                    f" {ui.format_size(result.size_bytes)})",
+                    "success",
+                )
             self._pending = (result, silences, changes)
             tracks = len({c.track.identity for c in changes})
             if tracks >= 2:

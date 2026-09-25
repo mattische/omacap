@@ -232,6 +232,25 @@ half-way through a take.
 The bar under the timer is a peak meter in dBFS. If it stays at `silent` while
 audio is playing, you are recording the wrong source — press `d` to cycle.
 
+If the level reaches the top of the scale, omacap says so — while recording, and
+again when the file is saved:
+
+```
+⚠ clipping  turn the application's own volume down, not the speakers
+```
+
+That wording is deliberate. On a hardware output the volume is applied in the
+device, *after* omacap taps the monitor, so turning your speakers down makes it
+quieter to listen to and does not change the recording at all. The application's
+own stream is the one that reaches the file:
+
+```bash
+pactl list short sink-inputs
+pactl set-sink-input-volume <id> 80%
+```
+
+`omacap record` prints the peak level of every take for the same reason.
+
 ### Non-interactive
 
 ```bash

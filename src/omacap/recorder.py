@@ -43,6 +43,14 @@ _ERROR_RE = re.compile(
 #: Quietest level the meter will show; anything below reads as silence.
 METER_FLOOR_DB = -60.0
 
+#: A peak at or above this has run out of headroom. Samples here are sitting at
+#: the top of the scale, which is where a digital recording starts to distort.
+CLIP_THRESHOLD_DB = -0.1
+
+#: One reading at the ceiling can be a single loud transient. Several means the
+#: recording is genuinely being squared off.
+CLIP_READINGS = 3
+
 #: Filter chain behind the live level meter. astats publishes the peak level as
 #: frame metadata and ametadata prints it to ffmpeg's log.
 METER_FILTER = (
@@ -85,6 +93,8 @@ class RecordingResult:
     duration: float
     size_bytes: int
     format_name: str
+    peak_db: float = METER_FLOOR_DB
+    clipped: bool = False
 
     @property
     def exists(self) -> bool:
@@ -139,6 +149,24 @@ class RecorderConfig:
         cmd += self.extra_ffmpeg_args
         cmd += ["-progress", "pipe:1", "-y", str(self.output_path)]
         return cmd
+
+
+def clipping_advice() -> str:
+    """Why a recording clipped, and what to change.
+
+    The trap is that on a hardware output the volume is applied in the device,
+    after the monitor is tapped. Turning the speakers down makes it quieter to
+    listen to and changes the recording not at all. The application's own stream
+    volume is the one that reaches the recording.
+    """
+    return (
+        "The recording reached full scale and is being clipped. On a hardware "
+        "output, turning the speakers down will not help: the volume is applied "
+        "after omacap taps the monitor. Lower the application's own stream "
+        "instead:\n"
+        "  pactl list short sink-inputs\n"
+        "  pactl set-sink-input-volume <id> 80%"
+    )
 
 
 def default_output_dir() -> Path:
@@ -324,6 +352,8 @@ class Recorder:
         self._out_time = 0.0
         self._total_size = 0
         self._peak_db = METER_FLOOR_DB
+        self._peak_hold = METER_FLOOR_DB
+        self._clip_readings = 0
         self._silence_events: list[tuple[str, float]] = []
         self._stderr_tail: list[str] = []
 
@@ -422,6 +452,8 @@ class Recorder:
             duration=duration,
             size_bytes=size,
             format_name=self.config.audio_format.name,
+            peak_db=self.peak_hold,
+            clipped=self.clipping,
         )
 
     # -- live progress -----------------------------------------------------
@@ -459,6 +491,9 @@ class Recorder:
             if peak is not None:
                 with self._lock:
                     self._peak_db = peak
+                    self._peak_hold = max(self._peak_hold, peak)
+                    if peak >= CLIP_THRESHOLD_DB:
+                        self._clip_readings += 1
                 continue
             event = parse_silence_line(line)
             if event is not None:
@@ -510,6 +545,18 @@ class Recorder:
     def peak_db(self) -> float:
         with self._lock:
             return self._peak_db
+
+    @property
+    def peak_hold(self) -> float:
+        """The loudest the recording has been, in dBFS."""
+        with self._lock:
+            return self._peak_hold
+
+    @property
+    def clipping(self) -> bool:
+        """Whether the level has run out of headroom often enough to matter."""
+        with self._lock:
+            return self._clip_readings >= CLIP_READINGS
 
     @property
     def silences(self):

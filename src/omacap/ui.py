@@ -76,6 +76,7 @@ class ViewModel:
     analyse_prompt: str | None = None
     split_prompt: str | None = None
     track_count: int = 0
+    clipping: bool = False
     player_label: str = ""
     update_notice: str = ""
 
@@ -277,6 +278,14 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
         screen.divider()
         codes = {"error": (RED,), "success": (GREEN,)}.get(vm.message_kind, (GREY,))
         screen.row("  " + screen.paint(truncate(vm.message, screen.inner - 3), *codes))
+
+    if vm.clipping:
+        screen.divider()
+        screen.row(
+            "  " + screen.paint("⚠ clipping", BOLD, RED)
+            + screen.paint("  turn the application's own volume down, not the "
+                           "speakers", GREY)
+        )
 
     if vm.update_notice:
         screen.divider()

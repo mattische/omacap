@@ -31,7 +31,9 @@ from .updater import (
 from .analysis.chords import DEFAULT_VOCABULARY, VOCABULARIES
 from .formats import DEFAULT_FORMAT, FORMAT_NAMES, FORMATS, get_format
 from .recorder import (
+    METER_FLOOR_DB,
     Recorder,
+    clipping_advice,
     sanitize_basename,
     RecorderConfig,
     RecorderError,
@@ -375,7 +377,9 @@ def cmd_record(args: argparse.Namespace) -> int:
             output_path=output_path,
             bitrate=args.bitrate if audio_format.supports_bitrate else None,
             duration=args.duration,
-            meter=False,
+            # Needed for the peak reading and the clipping warning; the cost is
+            # one filter and a line of log per frame.
+            meter=True,
             # Gaps are only worth reporting when something will act on them.
             detect_silence=splitting or stop_after > 0,
             silence_min_gap=min(
@@ -442,6 +446,10 @@ def cmd_record(args: argparse.Namespace) -> int:
             f"saved   {result.path} "
             f"({format_duration(result.duration)}, {format_size(result.size_bytes)})"
         )
+        if result.peak_db > METER_FLOOR_DB:
+            print(f"peak    {result.peak_db:.1f} dBFS")
+    if result.clipped:
+        print(f"\nomacap: {clipping_advice()}", file=sys.stderr)
 
     pieces: list[Path] = []
     if split_options.enabled:

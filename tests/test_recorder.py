@@ -14,7 +14,10 @@ import pytest
 
 from omacap.formats import get_format
 from omacap.recorder import (
+    CLIP_READINGS,
+    CLIP_THRESHOLD_DB,
     METER_FLOOR_DB,
+    clipping_advice,
     Recorder,
     RecorderConfig,
     RecorderError,
@@ -352,3 +355,44 @@ def test_probes_are_cached(fake_ffmpeg, monkeypatch):
         recorder.available_encoders()
         recorder.metering_supported()
     assert len(calls) == 2
+
+
+# -- level and clipping ----------------------------------------------------
+
+def test_the_loudest_moment_is_remembered(fake_ffmpeg, monitor_source, tmp_path):
+    take = Recorder(make_config(monitor_source, tmp_path))
+    take.start()
+    assert wait_until(lambda: take.peak_hold > METER_FLOOR_DB, timeout=6.0)
+    result = take.stop()
+    assert result.peak_db == take.peak_hold
+    assert result.peak_db > METER_FLOOR_DB
+
+
+def test_an_ordinary_recording_is_not_reported_as_clipping(fake_ffmpeg, monitor_source, tmp_path):
+    take = Recorder(make_config(monitor_source, tmp_path))
+    take.start()
+    assert wait_until(lambda: take.duration > 0.4)
+    result = take.stop()
+    assert take.clipping is False
+    assert result.clipped is False
+
+
+def test_a_recording_at_the_ceiling_is_reported(fake_ffmpeg, monitor_source, tmp_path, monkeypatch):
+    monkeypatch.setenv("OMACAP_TEST_LOUD", "1")
+    take = Recorder(make_config(monitor_source, tmp_path))
+    take.start()
+    assert wait_until(lambda: take.clipping, timeout=6.0)
+    result = take.stop()
+    assert result.clipped is True
+    assert result.peak_db >= CLIP_THRESHOLD_DB
+
+
+def test_one_loud_moment_is_not_clipping():
+    """A single transient at the ceiling is a peak, not a squared-off recording."""
+    assert CLIP_READINGS > 1
+
+
+def test_the_advice_names_the_thing_to_change():
+    advice = clipping_advice()
+    assert "sink-input-volume" in advice
+    assert "speakers" in advice        # says plainly what will not help

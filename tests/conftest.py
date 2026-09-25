@@ -19,7 +19,7 @@ import pytest
 #: `-progress pipe:1` does, logs peak levels the way ametadata does, and finalises
 #: the file on SIGINT exactly as ffmpeg does.
 FAKE_FFMPEG = r'''#!/usr/bin/env python3
-import signal, sys, time
+import os, signal, sys, time
 from pathlib import Path
 
 ENCODER_LISTING = """Encoders:
@@ -82,7 +82,10 @@ while not stop and (duration is None or elapsed < duration):
               file=sys.stderr, flush=True)
         announced_silence = True
     if metering:
-        level = "-inf" if int(elapsed * 10) % 20 < 5 else f"{-30 + elapsed:.6f}"
+        if os.environ.get("OMACAP_TEST_LOUD"):
+            level = "-0.020000"          # at the ceiling, i.e. clipping
+        else:
+            level = "-inf" if int(elapsed * 10) % 20 < 5 else f"{-30 + elapsed:.6f}"
         print(
             f"[Parsed_ametadata_1 @ 0x0] lavfi.astats.Overall.Peak_level={level}",
             file=sys.stderr, flush=True,

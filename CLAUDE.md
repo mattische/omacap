@@ -116,6 +116,11 @@ Worth knowing so they are not reintroduced:
   else.
 - **A stale update notice.** The cache can outlive the update it warned about, so
   `pending_update()` re-reads the local revision before showing anything.
+- **What you hear is not what you record.** On a hardware output the sink's
+  volume is applied in the device, after the monitor is tapped, so a recording can
+  clip while the speakers sound quiet. A null sink behaves the opposite way, which
+  makes it a misleading thing to test clipping against. This is why the clipping
+  advice names the *application's* stream volume, not the sink's.
 - **`mpris:trackid` is not an identity.** Chromium publishes one id for a whole
   browser session and changes only the title, so keying track changes on the id
   saw a browser playlist as a single endless track. A track is identified by
