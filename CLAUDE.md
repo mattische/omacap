@@ -80,6 +80,9 @@ the relevant tests; they encode the ground truth.
 | `analysis/features.py` | `N_FFT_CHROMA = 8192` | 2.7 Hz resolution, enough to separate semitones down to C2. 4096 could not resolve the bass. |
 | `analysis/features.py` | `N_FFT_ONSET = 2048` | Onsets need time resolution, not frequency resolution. Both share `HOP_LENGTH` so the time axes line up. |
 | `analysis/features.py` | `RESOLUTION_KNEE = 2.5` | A semitone needs about this many FFT bins across it before its neighbours separate. At C2 there are only 1.4, so each band is weighted by how well it is resolved rather than the low end being cut off. A hard cutoff at C3 was tried too and was worse; the taper is also stable for a knee anywhere from 2 to 3. |
+| `analysis/chords.py` | `CHANGE_PENALTY = 0.25`, `SAME_ROOT_FRACTION = 0.3` | Harmonic rhythm is slower than the beat. Agreement is flat from 0.20 to 0.30 and a progression that genuinely changes every beat survives to 0.30, so the middle is taken. Changing quality on the same root costs a fraction, or the decoder refuses to hear a suspension resolve. |
+| `analysis/meter.py` | `CUE_WEIGHTS = (0.3, 0.4, 0.3)` | Accent, harmonic change, kick band. The kick shares the work rather than replacing anything; adding it took one recording's metre confidence from 0.05 to 1.00 without unseating any time signature that was already right. |
+| `analysis/rhythm.py` | `STRAIGHT_BELOW = 0.56`, `SWUNG_BELOW = 0.72` | Where the off-beat sits. Straight reads 0.51 where 0.50 was played and triplet swing reads 0.67 where 0.667 was played, so the bands sit clear of both. |
 | `analysis/key.py` | `KEY_BONUS = 0.05` | A second decoding pass favours chords that belong to the detected key. 0.04-0.08 all gave the same gain, so the middle was taken. |
 | `analysis/features.py` | `sigma_semitones = 0.3` | 0.6 leaked into neighbouring pitch classes badly (a lone A4 scored A, G#, A# nearly equally). 0.2 is too narrow for real, slightly detuned instruments. |
 | `analysis/features.py` | *no log compression on chroma* | Log compression flattened contrast so far that a C major triad ranked G, G#, C. Measured: contrast 3.2 without it, 1.1 with it. |
@@ -144,6 +147,14 @@ in how the audio or the maths works is more likely to be fitting the charts'
 quirks than hearing the music better.
 
 ## Ideas that were tried and did not help
+
+**A bass chroma to settle the relative-key question.** The idea was that the
+lowest register would say which of a relative pair is home. It does not survive
+contact with the transform: on a recording in E minor the loudest bass pitch
+classes came back as D 19%, C 16%, **C# 14%**, D# 11%, and neither C# nor D# is in
+the song. They are the smear between the real notes, because the bass register
+cannot resolve semitones. Anything built on a bass chroma from this STFT is built
+on that.
 
 **Falling back to 4/4 when the metre was a close call.** The idea was that a metre
 chosen on a thin margin should defer to the commonest one. Measuring the margin as

@@ -85,7 +85,7 @@ def summary_rows(analysis) -> list[tuple[str, str]]:
     if meter.confidence < CERTAIN:
         meter_text += " \u2014 a close call, so the bars may be grouped wrongly"
 
-    return [
+    rows = [
         ("Key", key_text),
         ("Tempo", f"{analysis.tempo:.0f} BPM"),
         ("Time signature", meter_text),
@@ -99,6 +99,10 @@ def summary_rows(analysis) -> list[tuple[str, str]]:
             f"time signature {confidence_word(meter.confidence)}",
         ),
     ]
+    feel = getattr(analysis, "rhythm", None)
+    if feel is not None and feel.feel != "unclear":
+        rows.insert(3, ("Feel", feel.description))
+    return rows
 
 
 FOOTER = (

@@ -503,8 +503,9 @@ busy chart into an obvious four-bar loop.
 ### What it can and cannot do
 
 Detected: **time signature** (4/4, 3/4, 6/8, 5/4, 7/8), **key** (all 24 major and
-minor keys, with the key signature), **tempo** in BPM, the **number of bars**, and
-the **chords in each bar**.
+minor keys, with the key signature), **tempo** in BPM, the **feel** — whether the
+beat is played straight or swung, and where the off-beat sits — the **number of
+bars**, and the **chords in each bar**.
 
 Where a judgement was a close call, the chart says so on the line itself:
 
@@ -561,14 +562,19 @@ No machine learning and no scientific stack — just numpy and ffmpeg:
 4. **Tempo**: autocorrelation of the onset envelope under a log-normal prior,
    then beats placed by dynamic programming, then the tempo refined by fitting a
    line through the beat times.
-5. **Metre**: beats are grouped by testing each candidate against how accented
-   the candidate downbeats are and how often chords change on them.
+5. **Metre**: beats are grouped by testing each candidate against how accented the
+   candidate downbeats are, how often chords change on them, and how strong the
+   40–120 Hz band is — the kick drum, which is what says "one" on a dense mix
+   where compression has evened the accents out.
 6. **Chords**: chroma averaged per beat and correlated against chord templates,
    then smoothed by a Viterbi pass that charges a fixed cost per chord change.
 7. **Key**: Krumhansl-Schmuckler profiles, with the chord sequence casting the
    deciding vote between a key and its relative.
 8. **Chords again**: now that the key is known, the chords are recognised a second
    time with the diatonic ones favoured slightly, which settles the close calls.
+9. **Feel**: the onset strength is averaged over every beat, which says where the
+   off-beat falls. Half way is straight; two thirds is triplet swing. Measured
+   against patterns played on purpose, that position is recovered to within 0.01.
 
 ## Formats
 

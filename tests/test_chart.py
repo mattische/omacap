@@ -72,7 +72,11 @@ def test_confidence_wording(value, word):
 
 def test_the_summary_covers_everything_that_was_asked_for(analysis):
     labels = [label for label, _ in summary_rows(analysis)]
-    assert labels[:5] == ["Key", "Tempo", "Time signature", "Bars", "Length"]
+    for wanted in ("Key", "Tempo", "Time signature", "Bars", "Length"):
+        assert wanted in labels
+    # Musical judgements first, then the counts.
+    assert labels.index("Key") < labels.index("Bars")
+    assert labels.index("Time signature") < labels.index("Length")
 
 
 def test_the_grid_has_one_line_per_four_bars(analysis):

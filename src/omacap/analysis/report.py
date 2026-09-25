@@ -11,6 +11,7 @@ from .chords import DEFAULT_VOCABULARY, ChordSpan, decode, get_vocabulary, merge
 from .features import HOP_LENGTH, analyse_spectral, chromagram
 from .key import Key, detect_key_with_chords, diatonic_bonus
 from .meter import Meter, bar_boundaries, detect_meter
+from .rhythm import Rhythm, analyse_rhythm
 from .tempo import BeatGrid, analyse_tempo
 
 #: Analysis below this length is not worth reporting: there are too few beats
@@ -53,6 +54,7 @@ class Analysis:
     chords: list[ChordSpan]
     beat_count: int
     tempo_confidence: float
+    rhythm: Rhythm = field(default_factory=Rhythm)
 
     @property
     def bar_count(self) -> int:
@@ -133,6 +135,7 @@ def analyse_buffer(
         chords=merge_adjacent(spans),
         beat_count=len(grid),
         tempo_confidence=grid.confidence,
+        rhythm=analyse_rhythm(spectral.onset, spectral.frame_rate, grid.beats),
     )
 
 
