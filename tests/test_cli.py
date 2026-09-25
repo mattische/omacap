@@ -331,3 +331,284 @@ def test_recording_an_unavailable_format_fails_before_the_banner(
     captured = capsys.readouterr()
     assert "cannot encode mp3" in captured.err
     assert captured.out == ""
+
+
+# -- record --analyze ------------------------------------------------------
+
+def test_record_can_chart_the_take_it_just_made(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    charted = {}
+
+    class FakeAnalysis:
+        key = type("K", (), {"name": "C major", "signature": "no sharps or flats"})()
+        meter = type("M", (), {"name": "4/4"})()
+        tempo = 120.0
+        bar_count = 16
+
+    def fake_analyse(path, **kwargs):
+        charted["path"] = path
+        charted["vocabulary"] = kwargs.get("vocabulary")
+        return FakeAnalysis()
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", fake_analyse)
+    monkeypatch.setattr("omacap.cli.write_chart", lambda a, target, *rest: target)
+
+    code = cli.main(
+        ["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-n", "take", "-A"]
+    )
+    assert code == 0
+    assert charted["path"] == tmp_path / "take.wav"
+    out = capsys.readouterr().out
+    assert "saved" in out and "analysing" in out
+    assert "C major" in out and "120 BPM" in out and "4/4" in out
+
+
+def test_the_long_spelling_also_works(stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "omacap.analysis.report.analyse_file", lambda path, **kw: _cli_fake_analysis()
+    )
+    monkeypatch.setattr("omacap.cli.write_chart", lambda a, target, *rest: target)
+    assert cli.main(["record", "-d", "0.3", "-D", str(tmp_path), "--analyse"]) == 0
+
+
+def test_the_chord_vocabulary_reaches_the_analysis(stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_analyse(path, **kwargs):
+        seen.update(kwargs)
+        return _cli_fake_analysis()
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", fake_analyse)
+    monkeypatch.setattr("omacap.cli.write_chart", lambda a, target, *rest: target)
+    cli.main(["record", "-d", "0.3", "-D", str(tmp_path), "-A", "-c", "simple"])
+    assert seen["vocabulary"] == "simple"
+
+
+def test_the_chart_format_is_honoured(stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    written = {}
+    monkeypatch.setattr(
+        "omacap.analysis.report.analyse_file", lambda path, **kw: _cli_fake_analysis()
+    )
+
+    def fake_write(analysis, target, chart_format, *rest):
+        written["target"] = target
+        written["format"] = chart_format
+        return target
+
+    monkeypatch.setattr("omacap.cli.write_chart", fake_write)
+    cli.main(["record", "-d", "0.3", "-D", str(tmp_path), "-n", "x", "-A", "-t", "txt"])
+    assert written["format"] == "txt"
+    assert written["target"].suffix == ".txt"
+
+
+def test_a_failed_analysis_never_loses_the_recording(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.analysis.report import AnalysisError
+
+    def boom(path, **kwargs):
+        raise AnalysisError("no steady beat found")
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", boom)
+    code = cli.main(
+        ["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-n", "take", "-A"]
+    )
+    assert code == 1
+    assert (tmp_path / "take.wav").is_file()
+    captured = capsys.readouterr()
+    assert "the recording was saved" in captured.err
+    assert "saved" in captured.out
+
+
+def test_recording_without_the_flag_does_not_analyse(stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "omacap.analysis.report.analyse_file",
+        lambda path, **kw: pytest.fail("analysis should not have run"),
+    )
+    assert cli.main(["record", "-d", "0.3", "-D", str(tmp_path)]) == 0
+
+
+def test_quiet_with_analysis_prints_only_the_chart_path(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "omacap.analysis.report.analyse_file", lambda path, **kw: _cli_fake_analysis()
+    )
+    monkeypatch.setattr("omacap.cli.write_chart", lambda a, target, *rest: target)
+    cli.main(["record", "-d", "0.3", "-D", str(tmp_path), "-q", "-A"])
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 2                   # the recording, then the chart
+    assert lines[1].endswith(".md")
+
+
+def _cli_fake_analysis():
+    return type(
+        "A", (),
+        {
+            "key": type("K", (), {"name": "C major", "signature": "1 sharp"})(),
+            "meter": type("M", (), {"name": "4/4"})(),
+            "tempo": 120.0,
+            "bar_count": 8,
+        },
+    )()
+
+
+# -- update ----------------------------------------------------------------
+
+def test_update_check_reports_when_current(capsys, monkeypatch):
+    from omacap.updater import Installation, UpdateStatus
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(Path("/tmp/x"), managed=True)
+    )
+    monkeypatch.setattr(
+        cli, "check_now",
+        lambda inst: UpdateStatus(available=False, local="aaa", remote="aaa"),
+    )
+    assert cli.main(["update", "--check"]) == 0
+    assert "Already up to date" in capsys.readouterr().out
+
+
+def test_update_check_reports_an_available_version(capsys, monkeypatch):
+    from omacap.updater import Installation, UpdateStatus
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(Path("/tmp/x"), managed=True)
+    )
+    monkeypatch.setattr(
+        cli, "check_now",
+        lambda inst: UpdateStatus(available=True, local="aaa", remote="bbb"),
+    )
+    monkeypatch.setattr(
+        cli, "apply_update", lambda inst: pytest.fail("--check must not install")
+    )
+    assert cli.main(["update", "--check"]) == 0
+    out = capsys.readouterr().out
+    assert "aaa" in out and "bbb" in out
+    assert "An update is available" in out
+
+
+def test_update_installs_and_lists_what_changed(capsys, monkeypatch):
+    from omacap.updater import Installation, UpdateResult, UpdateStatus
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(Path("/tmp/x"), managed=True)
+    )
+    monkeypatch.setattr(
+        cli, "check_now",
+        lambda inst: UpdateStatus(available=True, local="aaa", remote="bbb"),
+    )
+    monkeypatch.setattr(
+        cli, "apply_update",
+        lambda inst: UpdateResult(True, "aaa", "bbb", ["bbb fix a thing"], "Updated aaa → bbb."),
+    )
+    assert cli.main(["update"]) == 0
+    out = capsys.readouterr().out
+    assert "fix a thing" in out and "Updated" in out
+
+
+def test_update_explains_a_non_git_installation(capsys, monkeypatch):
+    from omacap.updater import Installation
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(None, managed=False)
+    )
+    assert cli.main(["update"]) == 1
+    assert "install script" in capsys.readouterr().err
+
+
+def test_update_reports_an_unreachable_remote(capsys, monkeypatch):
+    from omacap.updater import Installation, UpdateStatus
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(Path("/tmp/x"), managed=True)
+    )
+    monkeypatch.setattr(
+        cli, "check_now",
+        lambda inst: UpdateStatus(available=False, error="could not reach the remote"),
+    )
+    assert cli.main(["update"]) == 1
+    assert "could not reach" in capsys.readouterr().err
+
+
+def test_a_failed_update_is_reported(capsys, monkeypatch):
+    from omacap.updater import Installation, UpdateError, UpdateStatus
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(Path("/tmp/x"), managed=True)
+    )
+    monkeypatch.setattr(
+        cli, "check_now",
+        lambda inst: UpdateStatus(available=True, local="aaa", remote="bbb"),
+    )
+
+    def boom(inst):
+        raise UpdateError("uncommitted changes")
+
+    monkeypatch.setattr(cli, "apply_update", boom)
+    assert cli.main(["update"]) == 1
+    assert "uncommitted changes" in capsys.readouterr().err
+
+
+# -- the startup notice ----------------------------------------------------
+
+def test_the_notice_goes_to_stderr_so_stdout_stays_pipeable(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.updater import UpdateStatus
+
+    monkeypatch.setattr(
+        cli, "pending_update",
+        lambda: UpdateStatus(available=True, local="aaa", remote="bbb"),
+    )
+    cli.main(["record", "-d", "0.3", "-D", str(tmp_path), "-q"])
+    captured = capsys.readouterr()
+    assert "update is available" in captured.err
+    assert Path(captured.out.strip()).is_file()      # stdout is still just a path
+
+
+def test_no_notice_when_nothing_is_waiting(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "pending_update", lambda: None)
+    cli.main(["record", "-d", "0.3", "-D", str(tmp_path), "-q"])
+    assert "update" not in capsys.readouterr().err
+
+
+def test_a_broken_check_never_breaks_a_command(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    def boom():
+        raise RuntimeError("network on fire")
+
+    monkeypatch.setattr(cli, "pending_update", boom)
+    assert cli.main(["record", "-d", "0.3", "-D", str(tmp_path), "-q"]) == 0
+
+
+def test_update_itself_does_not_print_the_notice(capsys, monkeypatch):
+    from omacap.updater import Installation, UpdateStatus
+
+    monkeypatch.setattr(
+        cli, "pending_update", lambda: pytest.fail("update reports in full itself")
+    )
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(Path("/tmp/x"), managed=True)
+    )
+    monkeypatch.setattr(
+        cli, "check_now",
+        lambda inst: UpdateStatus(available=False, local="aaa", remote="aaa"),
+    )
+    assert cli.main(["update", "--check"]) == 0
+
+
+def test_version_includes_the_revision(capsys, monkeypatch):
+    from omacap.updater import Installation
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(Path("/tmp/x"), managed=True)
+    )
+    monkeypatch.setattr(cli, "local_revision", lambda root: "abc1234")
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    assert "abc1234" in capsys.readouterr().out
+
+
+def test_version_without_a_revision(capsys, monkeypatch):
+    from omacap.updater import Installation
+
+    monkeypatch.setattr(
+        cli, "find_installation", lambda: Installation(None, managed=False)
+    )
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    out = capsys.readouterr().out
+    assert "omacap" in out and "(" not in out

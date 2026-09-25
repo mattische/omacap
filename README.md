@@ -86,29 +86,56 @@ refusing to record.
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/mattische/omacap/main/install.sh | bash
+```
+
+That clones omacap to `~/.local/share/omacap`, builds a virtualenv beside it and
+links `omacap` into `~/.local/bin`. Run it again any time to update, or use
+`omacap update`.
+
+If `~/.local/bin` is not on your `PATH`, the installer says so and tells you what
+to add.
+
+Installer options, as environment variables:
+
+| Variable | Effect |
+| --- | --- |
+| `OMACAP_HOME` | where to install (default `~/.local/share/omacap`) |
+| `OMACAP_BIN` | where to link the command (default `~/.local/bin`) |
+| `OMACAP_REF` | branch or tag to install (default `main`) |
+| `OMACAP_NO_ANALYZE` | set to skip numpy and install recording only |
+
+### By hand
+
+```bash
 git clone https://github.com/mattische/omacap.git
 cd omacap
-python3 -m venv .venv
-source .venv/bin/activate
-pip install .
+python3 -m venv .venv && source .venv/bin/activate
+pip install '.[analyze]'        # drop [analyze] for recording only
 ```
 
-That puts an `omacap` command on your `PATH` (inside the virtualenv). To get it
-everywhere without activating anything, use [pipx](https://pipx.pypa.io):
+A manual install still updates itself with `omacap update`, as long as it was
+installed from a git clone.
+
+### Updating
 
 ```bash
-pipx install /path/to/omacap
+omacap update           # fetch and install the latest
+omacap update --check   # just say whether anything is waiting
 ```
 
-To include the musical analysis (Step 2), install the `analyze` extra:
+omacap checks for updates at most once a day, in the background, and never
+delays startup: a notice appears the next time you run it. The check only talks
+to this project's git remote. Turn it off entirely with:
 
 ```bash
-pip install '.[analyze]'        # or: pipx install '/path/to/omacap[analyze]'
+export OMACAP_NO_UPDATE_CHECK=1
 ```
 
-Recording works without it. The extra pulls in numpy and nothing else.
+Updating refuses to run if the checkout has uncommitted changes, so a clone you
+have been editing is never overwritten.
 
-Check that everything is in place:
+### Check it works
 
 ```bash
 omacap doctor
@@ -118,10 +145,13 @@ omacap doctor
 omacap 0.1.0
 
 [ok] ffmpeg    /usr/bin/ffmpeg
+[ok] formats   all 6 formats available
+[ok] meter     live level meter available
 [ok] pactl     /usr/bin/pactl
 [ok] monitors  4 playback monitor(s) found
 [ok] default   alsa_output.usb-Generic_USB_Audio-00.analog-stereo.monitor
 [ok] folder    /home/you/Recordings/omacap is writable
+[ok] install   managed at /home/you/.local/share/omacap/src (4c7c930)
 [ok] analysis  numpy 2.5.3 - chord charts available
 
 Everything looks good.
@@ -138,6 +168,11 @@ omacap
 Start whatever you want to record, press **space**, press **space** again when
 you are done. The file is written to `~/Recordings/omacap`.
 
+As soon as a take is saved, omacap asks whether to analyse it. Press **y** to get
+a chord chart straight away, **n** to skip, or just carry on — any other key
+dismisses the question and does what you pressed it for. You can always analyse
+later with **a**.
+
 | Key | Action |
 | --- | --- |
 | `space` or `r` | start / stop recording |
@@ -147,6 +182,7 @@ you are done. The file is written to `~/Recordings/omacap`.
 | `d` | cycle the capture source |
 | `n` | name the next recording |
 | `a` | analyse the last take into a chord chart |
+| `y` / `n` | answer the question asked after a recording |
 | `t` | chart format: markdown or plain text |
 | `?` or `h` | show the key list |
 | `q` | quit |
@@ -165,7 +201,28 @@ omacap record -d 30                # record 30 seconds, then stop
 omacap record -f wav -n "take 3"   # WAV, named "take 3.wav"
 omacap record -o ~/mix.flac        # exact path; the extension picks the format
 omacap record -d 10 -q             # print only the resulting path
+omacap record -d 60 --analyze      # record, then chart it straight away
 ```
+
+`--analyze` (or `-A`) runs the analysis as soon as recording stops and writes the
+chart next to the recording. It takes the same `--chords`, `--chart-format` and
+`--bars-per-line` options as `omacap analyze`:
+
+```bash
+omacap record -d 60 -A -c simple -t txt
+```
+
+```
+saved   /home/you/Recordings/omacap/omacap_2026-09-25_10-17-02.wav (1:00, 11.0 MB)
+analysing…
+key     C major (no sharps or flats)
+tempo   120 BPM
+metre   4/4
+bars    30
+chart   /home/you/Recordings/omacap/omacap_2026-09-25_10-17-02.txt
+```
+
+If the analysis fails the recording is still saved; only the chart is lost.
 
 `omacap record` stops cleanly on `Ctrl-C` (or `SIGTERM`) and always finalises the
 file, so containers such as `.m4a` stay playable.
@@ -176,6 +233,7 @@ file, so containers such as `.m4a` stay playable.
 omacap devices    # list capture sources, with the default marked *
 omacap formats    # list output formats
 omacap doctor     # check the installation
+omacap update     # update to the latest version
 ```
 
 ### Options
@@ -190,6 +248,7 @@ omacap doctor     # check the installation
 | `-d, --duration` | *(record)* stop after this many seconds |
 | `-n, --name` | *(record)* basename for the generated filename |
 | `-q, --quiet` | *(record)* print only the saved path |
+| `-A, --analyze` | *(record)* chart the recording as soon as it stops |
 
 Set `OMACAP_OUTPUT_DIR` to change the default folder permanently.
 

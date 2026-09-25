@@ -35,6 +35,8 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("d", "cycle capture source"),
     ("n", "name the next recording"),
     ("a", "analyse the last take into a chord chart"),
+    ("y / n", "answer the question asked after a recording"),
+    ("y / n", "answer the question after a recording"),
     ("t", "chart format: markdown or plain text"),
     ("?", "toggle this help"),
     ("q", "quit"),
@@ -71,6 +73,8 @@ class ViewModel:
     message_kind: str = "info"
     show_help: bool = False
     name_prompt: str | None = None
+    analyse_prompt: str | None = None
+    update_notice: str = ""
 
 
 def visible_len(text: str) -> int:
@@ -221,6 +225,22 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
         screen.divider("name for next recording")
         screen.row("  " + screen.paint("> ", CYAN) + vm.name_prompt + screen.paint("█", DIM))
         screen.row("  " + screen.paint("enter to accept · esc to cancel", GREY))
+    elif vm.analyse_prompt is not None:
+        screen.divider("analyse this recording?")
+        screen.row(
+            "  " + screen.paint(truncate(vm.analyse_prompt, screen.inner - 3), BOLD)
+        )
+        screen.row(
+            "  "
+            + screen.paint(
+                "Find the key, tempo, bars and chords, and write a chord chart.",
+                GREY,
+            )
+        )
+        screen.row(
+            "  " + screen.paint("y", BOLD, GREEN) + screen.paint(" analyse now", GREY)
+            + screen.paint("    n", BOLD) + screen.paint(" skip", GREY)
+        )
     elif vm.show_help:
         screen.divider("keys")
         for key, description in KEY_HELP:
@@ -235,6 +255,10 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
         codes = {"error": (RED,), "success": (GREEN,)}.get(vm.message_kind, (GREY,))
         screen.row("  " + screen.paint(truncate(vm.message, screen.inner - 3), *codes))
 
+    if vm.update_notice:
+        screen.divider()
+        screen.row("  " + screen.paint(truncate(vm.update_notice, screen.inner - 3), CYAN))
+
     screen.divider()
     for line in _footer_lines(vm):
         screen.row("  " + screen.paint(truncate(line, screen.inner - 3), GREY))
@@ -245,6 +269,8 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
 def _footer_lines(vm: ViewModel) -> list[str]:
     if vm.name_prompt is not None:
         return ["typing a name · enter to accept"]
+    if vm.analyse_prompt is not None:
+        return ["y analyse · n skip · any other key dismisses it"]
     action = "stop" if vm.state == "recording" else "record"
     analyse = "a analyse · " if vm.can_analyse else ""
     return [

@@ -23,4 +23,18 @@ def require_numpy():
     return numpy
 
 
-__all__ = ["AnalysisUnavailable", "require_numpy"]
+def analysis_available() -> bool:
+    """Whether the analysis extras are installed.
+
+    Checks for the module without importing it, so asking the question stays
+    cheap enough to do on every start.
+    """
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("numpy") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+__all__ = ["AnalysisUnavailable", "analysis_available", "require_numpy"]

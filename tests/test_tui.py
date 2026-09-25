@@ -454,3 +454,135 @@ def test_cycling_reports_when_nothing_is_usable(app, monkeypatch):
     assert app.audio_format.name == before
     assert app.message_kind == "error"
     assert "No usable output formats" in app.message
+
+
+# -- the question asked after a recording ---------------------------------
+
+def test_a_finished_take_offers_analysis(app):
+    press(app, " ")
+    press(app, " ")
+    vm = app.view_model()
+    assert vm.analyse_prompt is not None
+    assert ".mp3" in vm.analyse_prompt
+    assert "y analyse" in "\n".join(tui.ui.render(vm, 74, use_color=False))
+
+
+def test_pressing_y_analyses_the_take(app, monkeypatch):
+    called = {}
+
+    def record_call(path, **kwargs):
+        called["path"] = path
+        return _FakeAnalysis()
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", record_call)
+    monkeypatch.setattr(tui, "write_chart", lambda a, target, fmt, *rest: target)
+
+    press(app, " ")
+    press(app, " ")
+    press(app, "y")
+    assert called["path"] == app.last_recording
+    assert app.analyse_prompt is None
+    assert app.message_kind == "success"
+
+
+def test_enter_also_accepts(app, monkeypatch):
+    monkeypatch.setattr(
+        "omacap.analysis.report.analyse_file", lambda path, **kwargs: _FakeAnalysis()
+    )
+    monkeypatch.setattr(tui, "write_chart", lambda a, target, fmt, *rest: target)
+    press(app, " ")
+    press(app, " ")
+    app.handle_key("\r")
+    assert app.analyse_prompt is None
+    assert app.message_kind == "success"
+
+
+def test_pressing_n_skips_and_says_how_to_do_it_later(app, monkeypatch):
+    monkeypatch.setattr(
+        "omacap.analysis.report.analyse_file",
+        lambda path, **kwargs: pytest.fail("analysis should not run"),
+    )
+    press(app, " ")
+    press(app, " ")
+    press(app, "n")
+    assert app.analyse_prompt is None
+    assert "press a" in app.message.lower()
+
+
+def test_escape_also_skips(app):
+    press(app, " ")
+    press(app, " ")
+    app.handle_key("\x1b")
+    assert app.analyse_prompt is None
+
+
+def test_another_key_dismisses_the_question_and_still_acts(app):
+    """Space should start the next take, not just clear the question."""
+    press(app, " ")
+    press(app, " ")
+    assert app.analyse_prompt is not None
+    press(app, " ")
+    assert app.analyse_prompt is None
+    assert app.state == "recording"
+
+
+def test_the_question_is_withdrawn_when_a_new_take_starts(app):
+    press(app, " ")
+    press(app, " ")
+    app.start_recording()
+    assert app.analyse_prompt is None
+
+
+def test_no_question_when_analysis_is_unavailable(app, monkeypatch):
+    monkeypatch.setattr(tui, "analysis_available", lambda: False)
+    press(app, " ")
+    press(app, " ")
+    assert app.analyse_prompt is None
+
+
+def test_no_question_when_the_take_failed(app):
+    FakeRecorder.fail_on_stop = "ffmpeg exited with code 1"
+    press(app, " ")
+    press(app, " ")
+    assert app.analyse_prompt is None
+
+
+def test_the_question_does_not_block_quitting(app):
+    press(app, " ")
+    press(app, " ")
+    press(app, "q")
+    assert app.running is False
+
+
+class _FakeAnalysis:
+    key = type("K", (), {"name": "C major", "short_name": "C"})()
+    meter = type("M", (), {"name": "4/4"})()
+    tempo = 120.0
+    bar_count = 16
+
+
+# -- the update notice -----------------------------------------------------
+
+def test_an_available_update_is_shown_in_the_interface(app, monkeypatch):
+    from omacap.updater import UpdateStatus
+
+    monkeypatch.setattr(
+        tui, "pending_update",
+        lambda: UpdateStatus(available=True, local="aaaaaaa", remote="bbbbbbb"),
+    )
+    app.refresh_update_notice()
+    assert "omacap update" in app.update_notice
+    assert "omacap update" in "\n".join(
+        tui.ui.render(app.view_model(), 74, use_color=False)
+    )
+
+
+def test_a_failing_update_check_is_invisible(app, monkeypatch):
+    """A broken network must not stop the interface starting."""
+
+    def boom():
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(tui, "pending_update", boom)
+    app.refresh_update_notice()
+    assert app.update_notice == ""

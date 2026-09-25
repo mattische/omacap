@@ -13,9 +13,11 @@ import tty
 from pathlib import Path
 
 from . import ui
+from .analysis import analysis_available
 from .chart import CHART_FORMATS, default_chart_path, write_chart
 from .devices import AudioSystemError, Source, list_monitors, resolve_source
 from .formats import FORMATS, AudioFormat, get_format, next_format
+from .updater import notice_line, pending_update
 from .recorder import (
     METER_FLOOR_DB,
     Recorder,
@@ -63,6 +65,8 @@ class TuiApp:
         self.chart_format: str = CHART_FORMATS[0]
         self.next_name: str | None = None
         self.name_prompt: str | None = None
+        self.analyse_prompt: str | None = None
+        self.update_notice: str = ""
         self.recordings: list[str] = []
         self.message = "Press space to start recording."
         self.message_kind = "info"
@@ -94,6 +98,8 @@ class TuiApp:
             size_bytes=recorder.size_bytes if active else 0,
             meter_db=self.meter_db,
             next_name=self.next_name,
+            analyse_prompt=self.analyse_prompt,
+            update_notice=self.update_notice,
             chart_format=self.chart_format,
             can_analyse=self.last_recording is not None,
             recordings=self.recordings,
@@ -104,6 +110,15 @@ class TuiApp:
         )
 
     # -- actions -----------------------------------------------------------
+
+    def refresh_update_notice(self) -> None:
+        """Look up whether a newer omacap is waiting. Never raises, never blocks."""
+        try:
+            status = pending_update()
+        except Exception:
+            self.update_notice = ""
+            return
+        self.update_notice = notice_line(status) if status else ""
 
     def notify(self, message: str, kind: str = "info") -> None:
         self.message = message
@@ -116,6 +131,7 @@ class TuiApp:
             self.start_recording()
 
     def start_recording(self) -> None:
+        self.analyse_prompt = None
         path = build_output_path(self.output_dir, self.audio_format, self.next_name)
         config = RecorderConfig(
             source=self.source,
@@ -155,11 +171,30 @@ class TuiApp:
                 f" {ui.format_size(result.size_bytes)})",
                 "success",
             )
+            if analysis_available():
+                self.analyse_prompt = (
+                    f"{result.path.name}   "
+                    f"{ui.format_duration(result.duration)}   "
+                    f"{ui.format_size(result.size_bytes)}"
+                )
         self.recorder = None
         self.next_name = None
 
+    def answer_analyse_prompt(self, key: str) -> bool:
+        """Handle the question asked after a take. True when the key was used."""
+        if key in ("y", "Y", "\r", "\n"):
+            self.analyse_prompt = None
+            self.analyse_last()
+            return True
+        self.analyse_prompt = None
+        if key in ("n", "N", "\x1b"):
+            self.notify("Not analysed. Press a at any time to do it later.")
+            return True
+        return False        # any other key falls through to its normal action
+
     def analyse_last(self) -> None:
         """Write a chord chart for the most recent recording."""
+        self.analyse_prompt = None
         if self.busy("Stop recording before analysing."):
             return
         if self.last_recording is None or not self.last_recording.is_file():
@@ -256,6 +291,8 @@ class TuiApp:
         if self.name_prompt is not None:
             self.handle_name_key(key)
             return
+        if self.analyse_prompt is not None and self.answer_analyse_prompt(key):
+            return
         if key in ("q", "\x03", "\x04"):
             self.running = False
         elif key in (" ", "r", "\r", "\n"):
@@ -338,6 +375,7 @@ class TuiApp:
             self.sources = list_monitors()
         except AudioSystemError as exc:
             self.notify(str(exc), "error")
+        self.refresh_update_notice()
         with raw_terminal():
             sys.stdout.write(ENTER_ALT_SCREEN + HIDE_CURSOR + CLEAR_SCREEN)
             sys.stdout.flush()

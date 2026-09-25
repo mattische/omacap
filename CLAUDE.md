@@ -19,9 +19,12 @@ bar count and the chords in each bar, written out as a chord chart.
 Both planned stages are finished, tested and pushed.
 
 - **Stage 1 — recording.** TUI and CLI, six output formats, live peak meter.
-- **Stage 2 — musical analysis.** `omacap analyze`, and `a` in the TUI.
+- **Stage 2 — musical analysis.** `omacap analyze`, `record --analyze`, `a` in
+  the TUI, and a y/n question offered as soon as a take is saved.
+- **Distribution.** `install.sh` for a one-line install, `omacap update` to
+  update in place, and a cached background update check that posts a notice.
 
-407 tests pass (`pytest`). Nothing is known to be broken.
+466 tests pass (`pytest`). Nothing is known to be broken.
 
 ## Design decisions that matter
 
@@ -44,6 +47,23 @@ resulting info chatter out of error messages. Do not "tidy" this back into a pip
 ffmpeg refuse to start and write *nothing*, so a slimmer ffmpeg build would
 silently cost a whole recording. `metering_supported()` and `available_encoders()`
 probe once and are cached. A failed probe means "assume it works", never "refuse".
+
+**The update check must never cost anything.** It reads a cache written by a
+background thread, at most once a day, and every failure path is silent: no git,
+no network, no remote, a detached HEAD or a corrupt cache all mean "say nothing"
+rather than "raise". The notice goes to **stderr**, so `omacap record -q | ...`
+still pipes a bare path. `OMACAP_NO_UPDATE_CHECK=1` disables it outright, and the
+test suite sets that automatically so no test ever reaches the network.
+
+**Updating never overwrites local work.** `apply_update()` refuses on a dirty
+working tree or a detached HEAD, and only ever fast-forwards. The install script
+refuses on a dirty tree too. Someone's clone with uncommitted changes is not ours
+to discard.
+
+**The installer installs editable.** `pip install --editable` means the code that
+runs *is* the checkout, so `omacap update` is a `git pull` plus a reinstall for
+entry points and dependencies, and `find_installation()` can locate the checkout
+by walking up from the imported package.
 
 **Analysis is numpy-only by choice.** librosa would have been faster to write but
 pulls in ~24 packages (numba, llvmlite, scikit-learn). The DSP here is a few
@@ -90,6 +110,12 @@ Worth knowing so they are not reintroduced:
 - **argparse subparser defaults.** `omacap -f flac record` silently dropped the
   format, because the subparser's `None` default overwrote the parent's value.
   Shared options use `argparse.SUPPRESS` in subparsers for this reason.
+- **git may simply not be there.** `doctor` crashed with `FileNotFoundError` on a
+  PATH without git. `_git()` now returns a failed `CompletedProcess` instead of
+  raising; git is only needed to self-update, so its absence must cost nothing
+  else.
+- **A stale update notice.** The cache can outlive the update it warned about, so
+  `pending_update()` re-reads the local revision before showing anything.
 
 ## Measured accuracy
 
@@ -120,7 +146,8 @@ python tools/live_check.py          # real audio through the real sound card
 installed on `PATH` by `tests/conftest.py`, and the analysis runs against audio
 synthesised by `tests/synth.py` with a known tempo, key, metre and progression.
 
-`tools/live_check.py` is the part that cannot be faked. It plays a generated
+`tools/live_check.py` also exercises the y/n question asked after a take. It is
+the part that cannot be faked. It plays a generated
 C–G–Am–F progression out of the default sink, records it back through the monitor,
 drives the real TUI over a pty, and analyses the result — then checks the answer
 is C major, 120 BPM, 4/4. Run it after touching recording, the TUI or the audio
@@ -143,6 +170,7 @@ src/omacap/
   devices.py      pactl: monitor source discovery
   formats.py      output formats and their encoder arguments
   chart.py        chord chart rendering (markdown and plain text)
+  updater.py      update detection, the cached check, and applying an update
   analysis/
     audio.py      decode to mono float32 via ffmpeg; silence trimming
     features.py   STFT, semitone filterbank, chroma, onset strength
@@ -153,6 +181,7 @@ src/omacap/
     report.py     orchestration; bars and their chords
 tools/
   live_check.py   manual end-to-end check against the real sound card
+install.sh        one-line installer; also the update path
 ```
 
 `ui.py` is deliberately free of I/O so the whole screen can be rendered and
@@ -181,4 +210,7 @@ Nothing here is needed; these are the natural next steps.
   recording. A windowed version would handle modulation.
 - **Bass-aware chords.** Slash chords (`C/E`) need the bass note separately,
   which means a low-band chroma alongside the full-range one.
-- **Packaging.** No AUR package or release tag yet; installation is a git clone.
+- **Release tags.** `install.sh` takes `OMACAP_REF`, so tagging releases and
+  defaulting to the latest tag rather than `main` would give people something
+  more stable than the tip of the branch.
+- **An AUR package.** The natural next step after tags for Arch and Omarchy.

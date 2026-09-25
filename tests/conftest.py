@@ -130,6 +130,20 @@ def fresh_capability_probes():
     _reset_capability_caches()
 
 
+@pytest.fixture(autouse=True)
+def no_update_checks(tmp_path_factory, monkeypatch):
+    """Keep the update check out of the way of every other test.
+
+    Without this the CLI's startup notice would reach the network and write to
+    the real cache in the user's home directory. Tests that exercise the check
+    turn it back on deliberately.
+    """
+    monkeypatch.setenv("OMACAP_NO_UPDATE_CHECK", "1")
+    monkeypatch.setenv(
+        "XDG_CACHE_HOME", str(tmp_path_factory.mktemp("cache"))
+    )
+
+
 @pytest.fixture
 def fake_ffmpeg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     bindir = tmp_path / "bin"

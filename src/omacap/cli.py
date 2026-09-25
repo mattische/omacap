@@ -14,6 +14,15 @@ from .analysis import AnalysisUnavailable
 from .analysis.audio import DecodeError
 from .analysis.report import AnalysisError
 from .devices import AudioSystemError, list_monitors, list_sources, resolve_source
+from .updater import (
+    UpdateError,
+    apply_update,
+    check_now,
+    find_installation,
+    local_revision,
+    notice_line,
+    pending_update,
+)
 from .analysis.chords import DEFAULT_VOCABULARY, VOCABULARIES
 from .formats import DEFAULT_FORMAT, FORMAT_NAMES, FORMATS, get_format
 from .recorder import (
@@ -45,7 +54,29 @@ examples:
   omacap devices                list the sources that carry playback audio
   omacap doctor                 check that everything needed is installed
   omacap analyze song.mp3       write a chord chart next to the recording
+  omacap record -d 60 -A        record a minute, then chart it straight away
+  omacap update                 install the latest version
 """
+
+
+class _VersionAction(argparse.Action):
+    """Prints the version with its git revision.
+
+    A custom action rather than argparse's built-in one so the revision is only
+    looked up when asked for, instead of on every single command.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        print(version_string())
+        parser.exit()
+
+
+def version_string() -> str:
+    installation = find_installation()
+    revision = (
+        local_revision(installation.checkout) if installation.checkout else ""
+    )
+    return f"omacap {__version__}" + (f" ({revision})" if revision else "")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,7 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--version", action="version", version=f"omacap {__version__}")
+    parser.add_argument(
+        "--version", action=_VersionAction, nargs=0,
+        help="show the version and the installed revision, then exit",
+    )
     _add_common(parser)
     subparsers = parser.add_subparsers(dest="command")
 
@@ -75,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     record.add_argument("-n", "--name", help="basename for the generated filename")
     record.add_argument("-q", "--quiet", action="store_true", help="only print the saved path")
+    record.add_argument(
+        "-A", "--analyze", "--analyse", dest="analyze", action="store_true",
+        help="analyse the recording as soon as it stops and write a chord chart",
+    )
+    _add_analysis_options(record)
 
     analyze = subparsers.add_parser(
         "analyze",
@@ -90,12 +129,36 @@ def build_parser() -> argparse.ArgumentParser:
         "-o", "--output", metavar="FILE",
         help="chart file to write (default: next to the recording)",
     )
+    _add_analysis_options(analyze)
     analyze.add_argument(
+        "-p", "--print", dest="to_stdout", action="store_true",
+        help="print the chart instead of writing a file",
+    )
+
+    update = subparsers.add_parser(
+        "update",
+        help="update omacap to the latest version",
+        description="Fetch and install the latest omacap from its git remote.",
+    )
+    update.add_argument(
+        "--check", action="store_true",
+        help="only report whether an update is available",
+    )
+
+    subparsers.add_parser("devices", help="list capture sources")
+    subparsers.add_parser("formats", help="list output formats")
+    subparsers.add_parser("doctor", help="check the installation")
+    return parser
+
+
+def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
+    """Options shared by ``analyze`` and by ``record --analyze``."""
+    parser.add_argument(
         "-t", "--chart-format", default=None, metavar="FMT",
         choices=("md", "txt", "markdown", "text"),
         help="chart format: md or txt (default: md, or taken from --output)",
     )
-    analyze.add_argument(
+    parser.add_argument(
         "-c", "--chords", default=DEFAULT_VOCABULARY, metavar="SET",
         choices=tuple(VOCABULARIES),
         help=(
@@ -103,19 +166,10 @@ def build_parser() -> argparse.ArgumentParser:
             f"or full (adds suspensions and diminished). Default: {DEFAULT_VOCABULARY}"
         ),
     )
-    analyze.add_argument(
+    parser.add_argument(
         "--bars-per-line", type=int, default=BARS_PER_LINE, metavar="N",
         help=f"bars per line in the chart (default: {BARS_PER_LINE})",
     )
-    analyze.add_argument(
-        "-p", "--print", dest="to_stdout", action="store_true",
-        help="print the chart instead of writing a file",
-    )
-
-    subparsers.add_parser("devices", help="list capture sources")
-    subparsers.add_parser("formats", help="list output formats")
-    subparsers.add_parser("doctor", help="check the installation")
-    return parser
 
 
 def _add_common(parser: argparse.ArgumentParser, suppress: bool = False) -> None:
@@ -147,6 +201,8 @@ def _add_common(parser: argparse.ArgumentParser, suppress: bool = False) -> None
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command != "update":
+        print_update_notice()
     try:
         if args.command == "devices":
             return cmd_devices()
@@ -158,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_record(args)
         if args.command in ("analyze", "analyse"):
             return cmd_analyze(args)
+        if args.command == "update":
+            return cmd_update(args)
         return cmd_tui(args)
     except (AudioSystemError, RecorderError, AnalysisError, AnalysisUnavailable,
             DecodeError, ValueError) as exc:
@@ -234,7 +292,47 @@ def cmd_record(args: argparse.Namespace) -> int:
             f"saved   {result.path} "
             f"({format_duration(result.duration)}, {format_size(result.size_bytes)})"
         )
+
+    if getattr(args, "analyze", False):
+        return _analyse_recording(result.path, args, quiet=args.quiet)
     return 0
+
+
+def _analyse_recording(path: Path, args: argparse.Namespace, quiet: bool = False) -> int:
+    """Chart a recording that was just made. Shared by `record -A`."""
+    from .analysis.report import analyse_file
+
+    chart_format = (
+        get_chart_format(args.chart_format) if args.chart_format else "md"
+    )
+    if not quiet:
+        print("analysing…", flush=True)
+    try:
+        analysis = analyse_file(path, vocabulary=args.chords)
+    except (AnalysisError, AnalysisUnavailable, DecodeError) as exc:
+        # The recording itself is safe on disk; a failed chart must not lose it.
+        print(f"omacap: the recording was saved, but analysis failed: {exc}",
+              file=sys.stderr)
+        return 1
+    target = write_chart(
+        analysis,
+        default_chart_path(path, chart_format),
+        chart_format,
+        args.bars_per_line,
+    )
+    if quiet:
+        print(target)
+    else:
+        _print_analysis_summary(analysis, target)
+    return 0
+
+
+def _print_analysis_summary(analysis, target: Path) -> None:
+    print(f"key     {analysis.key.name} ({analysis.key.signature})")
+    print(f"tempo   {analysis.tempo:.0f} BPM")
+    print(f"metre   {analysis.meter.name}")
+    print(f"bars    {analysis.bar_count}")
+    print(f"chart   {target}")
 
 
 def _format_for(path: Path) -> object:
@@ -268,11 +366,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         source, chart_format
     )
     write_chart(analysis, target, chart_format, args.bars_per_line)
-    print(f"key     {analysis.key.name} ({analysis.key.signature})")
-    print(f"tempo   {analysis.tempo:.0f} BPM")
-    print(f"metre   {analysis.meter.name}")
-    print(f"bars    {analysis.bar_count}")
-    print(f"chart   {target}")
+    _print_analysis_summary(analysis, target)
     return 0
 
 
@@ -281,6 +375,58 @@ def _chart_format_for(path: Path) -> str:
         return get_chart_format(path.suffix)
     except ValueError:
         return "md"
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    installation = find_installation()
+    print(f"installed as  {installation.description}")
+    if not installation.updatable:
+        print(
+            "omacap cannot update itself unless it was installed from a git "
+            "checkout. Reinstall with the install script to enable updates:\n"
+            "  curl -fsSL https://raw.githubusercontent.com/mattische/omacap"
+            "/main/install.sh | bash",
+            file=sys.stderr,
+        )
+        return 1
+
+    status = check_now(installation)
+    print(f"installed     {status.local or 'unknown'}")
+    if status.error:
+        print(f"omacap: {status.error}", file=sys.stderr)
+        return 1
+    print(f"latest        {status.remote}")
+
+    if not status.available:
+        print("\nAlready up to date.")
+        return 0
+    if args.check:
+        print("\nAn update is available. Run 'omacap update' to install it.")
+        return 0
+
+    try:
+        result = apply_update(installation)
+    except UpdateError as exc:
+        print(f"omacap: {exc}", file=sys.stderr)
+        return 1
+    print()
+    for line in result.changes:
+        print(f"  {line}")
+    print(f"\n{result.message}")
+    return 0
+
+
+def print_update_notice() -> None:
+    """One line on stderr when a newer version is waiting.
+
+    stderr so that piping `omacap record -q` somewhere still yields only a path.
+    """
+    try:
+        status = pending_update()
+    except Exception:
+        return
+    if status is not None:
+        print(f"omacap: {notice_line(status)}", file=sys.stderr)
 
 
 def cmd_devices() -> int:
@@ -372,6 +518,14 @@ def cmd_doctor() -> int:
     writable = _can_write(directory)
     print(f"[{'ok' if writable else 'XX'}] folder    {directory} {'is writable' if writable else 'is not writable'}")
     ok &= writable
+
+    installation = find_installation()
+    if installation.updatable:
+        revision = local_revision(installation.checkout) or "unknown"
+        print(f"[ok] install   {installation.description} ({revision})")
+    else:
+        print(f"[--] install   {installation.description}; "
+              f"'omacap update' is unavailable")
 
     # Optional: only needed for 'omacap analyze', so it never fails the check.
     try:

@@ -276,8 +276,10 @@ def check_tui(checks: Checks, out_dir: Path, music: Path | None, env,
     checks.add("the take was saved", "Saved" in tui.screen())
 
     if analyse:
-        print("  -- analysing (this takes a moment)")
-        tui.send("a")
+        checks.add("the interface offers to analyse the take",
+                   "analyse this recording?" in tui.screen())
+        print("  -- answering yes; analysing takes a moment")
+        tui.send("y")
         tui.pump(30.0)
         screen = tui.screen()
         detail = (screen.split("Chart written to")[-1].split("│")[0].strip()
