@@ -519,7 +519,9 @@ No machine learning and no scientific stack — just numpy and ffmpeg:
 
 1. **Decode** to mono 22 kHz through ffmpeg, then trim leading and trailing silence.
 2. **Chromagram**: an STFT mapped onto semitone bands and folded into twelve
-   pitch classes.
+   pitch classes. Each band is weighted by how well the transform can resolve it —
+   at C2 there are only 1.4 FFT bins across a semitone, so the bottom of the range
+   cannot separate neighbouring notes and is believed proportionally less.
 3. **Onset strength**: spectral flux, with a local median removed so a loud
    chorus does not drown out a quiet verse.
 4. **Tempo**: autocorrelation of the onset envelope under a log-normal prior,
@@ -531,6 +533,8 @@ No machine learning and no scientific stack — just numpy and ffmpeg:
    then smoothed by a Viterbi pass that charges a fixed cost per chord change.
 7. **Key**: Krumhansl-Schmuckler profiles, with the chord sequence casting the
    deciding vote between a key and its relative.
+8. **Chords again**: now that the key is known, the chords are recognised a second
+   time with the diatonic ones favoured slightly, which settles the close calls.
 
 ## Formats
 

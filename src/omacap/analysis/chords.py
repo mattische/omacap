@@ -207,14 +207,25 @@ def viterbi(scores, change_penalty: float = CHANGE_PENALTY):
 
 
 def decode(
-    chroma, frame_rate: float, boundaries, qualities: tuple[str, ...] | None = None
+    chroma,
+    frame_rate: float,
+    boundaries,
+    qualities: tuple[str, ...] | None = None,
+    bonus=None,
 ) -> list[ChordSpan]:
-    """Recognise one chord per interval between ``boundaries``."""
+    """Recognise one chord per interval between ``boundaries``.
+
+    ``bonus`` is an optional per-chord nudge, aligned with :func:`chord_labels`.
+    It is how a second pass tells the decoder which chords belong to the key it
+    has since worked out.
+    """
     np = require_numpy()
     segments = synchronise(chroma, frame_rate, boundaries)
     if segments.shape[0] == 0:
         return []
     scores = match_templates(segments, qualities=qualities)
+    if bonus is not None:
+        scores = scores + np.asarray(bonus)
     path = viterbi(scores)
     labels = chord_labels()
     boundaries = np.asarray(boundaries, dtype=np.float64)

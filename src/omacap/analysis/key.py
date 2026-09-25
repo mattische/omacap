@@ -91,6 +91,32 @@ def detect_key(chroma) -> Key:
     return Key(tonic=tonic, mode=mode, correlation=correlation, confidence=confidence)
 
 
+#: How much a chord that belongs to the key is favoured on a second pass.
+#: Measured against a real song with a known chart: 0.04-0.08 all gave the same
+#: improvement, so the middle is taken rather than the edge of what was tried.
+KEY_BONUS = 0.05
+
+
+def diatonic_bonus(key: Key, strength: float = KEY_BONUS):
+    """A per-chord nudge towards the chords that belong to ``key``.
+
+    Chord recognition happens before the key is known, but once it is, most of
+    what a song plays is diatonic. Recognising the chords again with that in mind
+    corrects the ones that were a close call the first time.
+    """
+    np = require_numpy()
+    from .chords import QUALITIES, chord_labels
+
+    diatonic = MAJOR_DIATONIC if key.mode == "major" else MINOR_DIATONIC
+    bonus = np.zeros(len(chord_labels()))
+    for index in range(len(chord_labels()) - 1):          # the last is no-chord
+        degree = (index % 12 - key.tonic) % 12
+        quality = QUALITIES[index // 12][0]
+        if quality in diatonic.get(degree, ()):
+            bonus[index] = strength
+    return bonus
+
+
 def pitch_name(pitch_class: int, key: Key | None = None) -> str:
     """Spell a pitch class, preferring flats in flat keys."""
     from .features import FLAT_NAMES

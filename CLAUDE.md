@@ -79,6 +79,8 @@ the relevant tests; they encode the ground truth.
 | --- | --- | --- |
 | `analysis/features.py` | `N_FFT_CHROMA = 8192` | 2.7 Hz resolution, enough to separate semitones down to C2. 4096 could not resolve the bass. |
 | `analysis/features.py` | `N_FFT_ONSET = 2048` | Onsets need time resolution, not frequency resolution. Both share `HOP_LENGTH` so the time axes line up. |
+| `analysis/features.py` | `RESOLUTION_KNEE = 2.5` | A semitone needs about this many FFT bins across it before its neighbours separate. At C2 there are only 1.4, so each band is weighted by how well it is resolved rather than the low end being cut off. Measured against a real song with a known chart: the longest correct run went from 16 bars to 24. |
+| `analysis/key.py` | `KEY_BONUS = 0.05` | A second decoding pass favours chords that belong to the detected key. 0.04-0.08 all gave the same gain, so the middle was taken. Raised agreement with a real chart from 91% to 94%. |
 | `analysis/features.py` | `sigma_semitones = 0.3` | 0.6 leaked into neighbouring pitch classes badly (a lone A4 scored A, G#, A# nearly equally). 0.2 is too narrow for real, slightly detuned instruments. |
 | `analysis/features.py` | *no log compression on chroma* | Log compression flattened contrast so far that a C major triad ranked G, G#, C. Measured: contrast 3.2 without it, 1.1 with it. |
 | `analysis/chords.py` | correlation, not cosine | Mean-subtracting makes the *absence* of a pitch count as evidence. With plain cosine every triad loses to the seventh chord containing it. |
@@ -127,6 +129,22 @@ Worth knowing so they are not reintroduced:
   `(trackid, title, artist)`. Spotify's desktop client does move the id, which is
   why this went unnoticed until the same playlist was played in a browser.
 
+## Chroma ideas that were tried and did not help
+
+Measured against a real band recording with the band's own chord chart as ground
+truth, so these are not guesses. None of them is worth trying again without a
+better reason than "it is what the literature does":
+
+- **Percussive suppression** (a median filter over time on the semitone bands, to
+  keep what is sustained): no change at all. The drums were not what was confusing
+  it.
+- **Harmonic suppression** (subtracting a shifted copy of the spectrum, since a
+  note's third harmonic is a fifth above it): actively worse, 91% down to 85%. It
+  removes the real fifths of real chords along with the imaginary ones.
+- **Spectral whitening**: mixed. Slightly worse agreement, slightly longer runs.
+
+What did work was narrowing where the evidence comes from, and using the key.
+
 ## Measured accuracy
 
 From the test suite, against synthesised material with known ground truth:
@@ -138,8 +156,12 @@ From the test suite, against synthesised material with known ground truth:
 - Key: 8/8 on resolving progressions; 5/6 on deliberately ambiguous loops, versus
   2/6 for chroma alone without the chord evidence.
 
-On the private reference track used during development (a 4:30 band mix) it
-reports G major, 124 BPM, 4/4, 139 bars, and a clear repeating `D | C | Em | D`.
+On the private reference track used during development (a 4:30 band mix, for
+which the band's own chord chart exists) it agrees with that chart on **94% of
+bars**, reproduces the verse loop for **24 unbroken bars**, and gets the tempo and
+time signature right. It calls the key G major where the band calls it E minor -
+the relative major, with the same diatonic chords, and it reports that as only
+medium confidence rather than claiming certainty.
 A separate live recording of the same track through the sound card agrees — a
 useful end-to-end check that the recording path and the analysis path are
 consistent. Keep a real piece of music around for this: the synthetic tests catch

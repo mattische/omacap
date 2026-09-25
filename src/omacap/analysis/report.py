@@ -9,7 +9,7 @@ from . import require_numpy
 from .audio import ANALYSIS_RATE, AudioBuffer, load_audio, trim_silence
 from .chords import DEFAULT_VOCABULARY, ChordSpan, decode, get_vocabulary, merge_adjacent
 from .features import HOP_LENGTH, analyse_spectral, chromagram
-from .key import Key, detect_key_with_chords
+from .key import Key, detect_key_with_chords, diatonic_bonus
 from .meter import Meter, bar_boundaries, detect_meter
 from .tempo import BeatGrid, analyse_tempo
 
@@ -109,6 +109,14 @@ def analyse_buffer(
     beat_chroma = _beat_chroma(spectral, beat_edges)
 
     meter = detect_meter(grid.beats, spectral.onset, spectral.frame_rate, beat_chroma)
+    key = detect_key_with_chords(spectral.chroma, merge_adjacent(spans))
+
+    # Now that the key is known, recognise the chords again with it in mind. Most
+    # of what a song plays is diatonic, and this settles the close calls.
+    spans = decode(
+        spectral.chroma, spectral.frame_rate, beat_edges,
+        get_vocabulary(vocabulary), diatonic_bonus(key),
+    )
     key = detect_key_with_chords(spectral.chroma, merge_adjacent(spans))
     bars = build_bars(grid, meter, spans, duration=buffer.duration)
 

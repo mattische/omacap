@@ -24,6 +24,12 @@ N_FFT = N_FFT_CHROMA
 MIN_MIDI = 36
 MAX_MIDI = 96
 
+#: A semitone needs at least this many FFT bins across it before its neighbours
+#: can be told apart. Below C3 there are fewer, and at C2 only 1.4, so that part
+#: of the spectrum contributes smeared pitch classes rather than chord tones.
+#: Rather than cutting it off, each band is weighted by how well it is resolved.
+RESOLUTION_KNEE = 2.5
+
 PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 FLAT_NAMES = ("C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B")
 
@@ -100,6 +106,27 @@ def semitone_filterbank(
     return weights / np.maximum(totals, 1e-12)
 
 
+def resolution_weights(
+    sample_rate: int,
+    n_fft: int = N_FFT_CHROMA,
+    min_midi: int = MIN_MIDI,
+    max_midi: int = MAX_MIDI,
+    knee: float = RESOLUTION_KNEE,
+):
+    """How much each semitone band deserves to be believed.
+
+    A band is only as trustworthy as the frequency resolution across it. This
+    tapers the bottom of the range off smoothly instead of cutting it, so a bass
+    note still registers - just not strongly enough to outvote the range where
+    the notes are actually separable.
+    """
+    np = require_numpy()
+    centres = midi_to_hz(np.arange(min_midi, max_midi))
+    bin_width = sample_rate / n_fft
+    bins_per_semitone = centres * (2.0 ** (1.0 / 12.0) - 1.0) / bin_width
+    return np.clip(bins_per_semitone / knee, 0.0, 1.0)
+
+
 def chromagram(
     samples, sample_rate: int, n_fft: int = N_FFT_CHROMA, hop_length: int = HOP_LENGTH
 ):
@@ -113,6 +140,7 @@ def chromagram(
     magnitude = stft_magnitude(samples, n_fft, hop_length)
     bank = semitone_filterbank(sample_rate, n_fft)
     semitones = bank @ magnitude
+    semitones = semitones * resolution_weights(sample_rate, n_fft)[:, None]
 
     chroma = np.zeros((12, semitones.shape[1]), dtype=np.float64)
     for index in range(semitones.shape[0]):
