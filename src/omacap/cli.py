@@ -280,6 +280,10 @@ def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
         "--no-collapse", dest="collapse", action="store_false",
         help="write every bar out instead of collapsing repeated phrases",
     )
+    parser.add_argument(
+        "--no-sections", dest="sections", action="store_false",
+        help="one chordgrid block for the whole song, not one per section",
+    )
 
 
 def _add_common(parser: argparse.ArgumentParser, suppress: bool = False) -> None:
@@ -512,6 +516,7 @@ def _analyse_recording(path: Path, args: argparse.Namespace, quiet: bool = False
         chart_format,
         args.bars_per_line,
         args.collapse,
+        args.sections,
     )
     if quiet:
         print(target)
@@ -601,7 +606,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             if index:
                 print()
             print(render(analysis, chart_format, args.bars_per_line,
-                         args.collapse))
+                         args.collapse, args.sections))
             continue
 
         target = (
@@ -609,7 +614,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             else default_chart_path(source, chart_format)
         )
         write_chart(analysis, target, chart_format, args.bars_per_line,
-                    args.collapse)
+                    args.collapse, args.sections)
         _print_analysis_summary(analysis, target)
         if len(sources) > 1:
             print()
@@ -744,7 +749,7 @@ def _analyse_many(paths: list[Path], args: argparse.Namespace) -> int:
             continue
         target = write_chart(
             analysis, default_chart_path(path, chart_format),
-            chart_format, args.bars_per_line, args.collapse,
+            chart_format, args.bars_per_line, args.collapse, args.sections,
         )
         print(f"  {target.name}: {analysis.key.short_name}, "
               f"{analysis.tempo:.0f} BPM, {analysis.meter.name}, "

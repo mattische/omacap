@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+
+from .chordgrid import bar_source
 
 #: Bars per line. Four is how lead sheets are normally laid out.
 BARS_PER_LINE = 4
@@ -49,6 +52,9 @@ def confidence_word(value: float) -> str:
 
 #: Appended to a bar the analysis was less sure of.
 UNCERTAIN_MARK = "?"
+
+#: How many uncertain bars to name before summarising the rest as a count.
+MAX_NAMED_BARS = 12
 
 
 def bar_text(bar, uncertain: set[int]) -> str:
@@ -107,6 +113,129 @@ def _layout(analysis, bars_per_line: int, collapse: bool):
     return rows if len(rows) < len(flat) else flat
 
 
+@dataclass
+class Section:
+    """One block of a sectioned chart: its rows and what to call it."""
+
+    rows: list
+    letter: str = ""
+    repeats: int = 1
+    start: int = 0
+    end: int = 0
+
+    @property
+    def named(self) -> bool:
+        return bool(self.letter)
+
+
+def _row_bars(rows: list) -> list:
+    return [bar for _, row, _, _, _ in rows for bar in row]
+
+
+def _group_rows(rows: list, bars_per_line: int) -> list[Section]:
+    """Split the rows into sections: each repeated phrase, and the runs between.
+
+    A run of bars belonging to no phrase is merged into the section before it
+    when it is short, so a single bar between two phrases does not become a
+    block of its own. It sits after the closing repeat, which is where a chart
+    would put it anyway.
+    """
+    sections: list[Section] = []
+    current: list = []
+    inside = False
+
+    def close(letter: str = "", repeats: int = 1) -> None:
+        if not current:
+            return
+        bars = _row_bars(current)
+        first = bars[0].number
+        # A repeated phrase lists one pass, so its last bar is that many passes on.
+        last = first + len(bars) * repeats - 1 if letter else bars[-1].number
+        sections.append(Section(list(current), letter, repeats, first, last))
+        current.clear()
+
+    for row in rows:
+        _, _, letter, repeats, mark = row
+        if mark in ("open", "both"):
+            close()
+            inside = True
+        current.append(row)
+        if inside and mark in ("close", "both"):
+            close(letter, max(1, repeats))
+            inside = False
+    close()
+
+    merged: list[Section] = []
+    for section in sections:
+        short = len(_row_bars(section.rows)) <= bars_per_line
+        if merged and not section.named and short and merged[-1].named:
+            previous = merged[-1]
+            previous.rows = previous.rows + section.rows
+            previous.end = section.end
+            continue
+        merged.append(section)
+    return merged
+
+
+def section_heading(section: Section, first: bool, last: bool) -> str:
+    """The markdown line written above a section's grid.
+
+    The plugin has no notation for a section label, so it goes here. What it says
+    is only what can be known: the phrase's letter, which bars it covers and how
+    many times it is played. Not "verse" or "chorus" - see `render_markdown`.
+    """
+    where = (f"bar {section.start}" if section.start == section.end
+             else f"bars {section.start}\u2013{section.end}")
+    if section.named:
+        played = (f" \u00b7 played {section.repeats} times"
+                  if section.repeats > 1 else "")
+        return f"**{section.letter}** \u00b7 {where}{played}"
+    # A run belonging to no phrase is named only where its position says what it
+    # is: before everything, or after everything.
+    if first:
+        return f"**Intro** \u00b7 {where}"
+    if last:
+        return f"**Outro** \u00b7 {where}"
+    return f"**{where[0].upper()}{where[1:]}**"
+
+
+def _sections_note(analysis, bars_per_line: int, collapse: bool,
+                   sections: bool) -> list[str]:
+    """One line saying what the section labels above each grid mean.
+
+    They are letters and bar numbers, not "verse" and "chorus". Naming the parts
+    was tried and does not hold up: see CLAUDE.md for the measurements.
+    """
+    if not sections or not analysis.bars:
+        return []
+    rows = _layout(analysis, bars_per_line, collapse)
+    if len(_group_rows(rows, bars_per_line)) < 2:
+        return []
+    return ["Each part is a separate grid below, labelled with its letter and "
+            "bars. The letters say which parts are the same as each other, not "
+            "which one is the verse.", ""]
+
+
+def _uncertain_note(analysis, grid: bool) -> list[str]:
+    """How the bars worth a second listen are pointed out.
+
+    A chordgrid block cannot carry the mark: a `?` stops the plugin reading the
+    bar as chords at all. So for a grid the bars are named here instead, which
+    says the same thing without breaking what it is written on.
+    """
+    uncertain = sorted(getattr(analysis, "uncertain_bars", set()))
+    if not uncertain:
+        return []
+    if not grid:
+        return [f"A `{UNCERTAIN_MARK}` marks a bar the audio matched less well "
+                f"than the rest of the song - worth a second listen."]
+    shown = ", ".join(str(number) for number in uncertain[:MAX_NAMED_BARS])
+    if len(uncertain) > MAX_NAMED_BARS:
+        shown += f" and {len(uncertain) - MAX_NAMED_BARS} more"
+    return [f"Bars the audio matched less well than the rest of the song, worth "
+            f"a second listen: {shown}."]
+
+
 def _form_note(analysis, rows: list) -> list[str]:
     """One line naming the song's form, when the chart is written that way."""
     if not any(repeats for _, _, _, repeats, _ in rows):
@@ -152,30 +281,61 @@ def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE,
 
 
 def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
-                    collapse: bool = True) -> list[str]:
+                    collapse: bool = True, sections: bool = True) -> list[str]:
     """The chart as a chordgrid block, which Obsidian renders as a chart.
 
     The format a working musician's notes are already in: a time signature, then
     bars between pipes. Writing this means omacap's output can sit beside charts
     written by hand instead of having to be copied across.
+
+    Nothing omacap writes for its own benefit goes in here. A `?` is not part of
+    the plugin's grammar, and a bar it cannot read as chords it reads as rhythm
+    instead, so the uncertain bars are named in the text above the block rather
+    than marked inside it. See `chordgrid.py`.
     """
     bars = analysis.bars
     if not bars:
         return ["```chordgrid", "4/4", "```"]
 
-    uncertain = getattr(analysis, "uncertain_bars", set())
-    lines = ["```chordgrid", "measure-num", "", analysis.meter.name, ""]
-    for _, row, _, repeats, mark in _layout(analysis, bars_per_line, collapse):
-        cells = " | ".join(bar_text(bar, uncertain) for bar in row)
-        # Repeat marks are how a chart says this twice. The count goes on the
-        # closing mark as "x3", with no space: that is the syntax the chordgrid
-        # plugin parses, and anything else loses the count silently.
-        left = "||:" if mark in ("open", "both") else "|"
-        right = ":||" if mark in ("close", "both") else "|"
-        if repeats > 1 and right == ":||":
-            right += f"x{repeats}"
-        lines.append(f"{left} {cells} {right}")
-    lines.append("```")
+    meter = analysis.meter
+    spans = getattr(analysis, "chords", [])
+    rows = _layout(analysis, bars_per_line, collapse)
+
+    def grid(block_rows: list, numbered: bool) -> list[str]:
+        head = ["```chordgrid"]
+        if numbered:
+            head += ["measure-num", ""]
+        head += [meter.name, ""]
+        body = []
+        for _, row, _, repeats, mark in block_rows:
+            cells = " | ".join(bar_source(bar, spans, meter) for bar in row)
+            # Repeat marks are how a chart says this twice. The count goes on the
+            # closing mark as "x3", with no space: that is the syntax the
+            # chordgrid plugin parses, and anything else loses the count.
+            left = "||:" if mark in ("open", "both") else "|"
+            right = ":||" if mark in ("close", "both") else "|"
+            if repeats > 1 and right == ":||":
+                right += f"x{repeats}"
+            body.append(f"{left} {cells} {right}")
+        return head + body + ["```"]
+
+    if not sections:
+        return grid(rows, numbered=True)
+
+    groups = _group_rows(rows, bars_per_line)
+    if len(groups) < 2:
+        return grid(rows, numbered=True)
+
+    # One block per section, with the label above it in plain markdown. The bar
+    # numbers live in the headings, so the blocks do not number their own.
+    lines: list[str] = []
+    for index, section in enumerate(groups):
+        if index:
+            lines.append("")
+        lines.append(section_heading(section, first=index == 0,
+                                     last=index == len(groups) - 1))
+        lines.append("")
+        lines += grid(section.rows, numbered=False)
     return lines
 
 
@@ -228,7 +388,8 @@ FOOTER = (
 
 
 def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
-                    grid: bool = False, collapse: bool = True) -> str:
+                    grid: bool = False, collapse: bool = True,
+                    sections: bool = True) -> str:
     """A Markdown chart, with the grid kept in a code block so it stays aligned."""
     rows = summary_rows(analysis)
     lines = [f"# {analysis.source.stem}", "", "| | |", "| --- | --- |"]
@@ -237,14 +398,11 @@ def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
     lines += ["", "## Chart", ""]
     lines.append(f"Bars read left to right, {bars_per_line} per line.")
     lines += _form_note(analysis, _layout(analysis, bars_per_line, collapse))
-    if getattr(analysis, "uncertain_bars", set()):
-        lines.append(
-            f"A `{UNCERTAIN_MARK}` marks a bar the audio matched less well than "
-            f"the rest of the song - worth a second listen."
-        )
+    lines += _uncertain_note(analysis, grid)
     lines.append("")
     if grid:
-        lines += chordgrid_lines(analysis, bars_per_line, collapse)
+        lines += _sections_note(analysis, bars_per_line, collapse, sections)
+        lines += chordgrid_lines(analysis, bars_per_line, collapse, sections)
     else:
         lines += ["```"] + chart_lines(analysis, bars_per_line, collapse) + ["```"]
     lines += ["", "---", "", FOOTER, ""]
@@ -269,13 +427,14 @@ def render_text(analysis, bars_per_line: int = BARS_PER_LINE,
 
 
 def render(analysis, chart_format: str = DEFAULT_CHART_FORMAT,
-           bars_per_line: int = BARS_PER_LINE, collapse: bool = True) -> str:
+           bars_per_line: int = BARS_PER_LINE, collapse: bool = True,
+           sections: bool = True) -> str:
     """Render in the requested format."""
     wanted = get_chart_format(chart_format)
     if wanted == "txt":
         return render_text(analysis, bars_per_line, collapse)
-    return render_markdown(analysis, bars_per_line,
-                           grid=wanted == "chordgrid", collapse=collapse)
+    return render_markdown(analysis, bars_per_line, grid=wanted == "chordgrid",
+                           collapse=collapse, sections=sections)
 
 
 def write_chart(
@@ -284,12 +443,14 @@ def write_chart(
     chart_format: str = DEFAULT_CHART_FORMAT,
     bars_per_line: int = BARS_PER_LINE,
     collapse: bool = True,
+    sections: bool = True,
 ) -> Path:
     """Write the chart to ``path``."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render(analysis, chart_format, bars_per_line, collapse),
-                    encoding="utf-8")
+    path.write_text(
+        render(analysis, chart_format, bars_per_line, collapse, sections),
+        encoding="utf-8")
     return path
 
 

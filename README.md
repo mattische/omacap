@@ -488,6 +488,7 @@ In the interactive interface, press **a** after a take to do the same thing, and
 | `-c, --chords` | vocabulary: `simple`, `standard` (default) or `full` |
 | `--bars-per-line` | bars per line in the grid (default: 4) |
 | `--no-collapse` | write every bar out instead of collapsing repeated phrases |
+| `--no-sections` | one chordgrid block for the whole song, not one per section |
 | `-p, --print` | print the chart instead of writing a file |
 
 The chord vocabulary is the setting worth knowing about:
@@ -545,7 +546,7 @@ goes away with it.
 
 ### Writing into Obsidian
 
-`--chart-format chordgrid` writes the chart as a `chordgrid` block, which Obsidian
+`--chart-format chordgrid` writes the chart as `chordgrid` blocks, which Obsidian
 renders as a chart rather than as text:
 
 ````bash
@@ -553,20 +554,51 @@ omacap analyze take.flac -t chordgrid
 ````
 
 ````markdown
-```chordgrid
-measure-num
+**A** · bars 6–30 · played 3 times
 
+```chordgrid
 4/4
 
 ||: C | Em | D | D |
 | C | Em | D | D :||x3
+| D |
 ```
 ````
 
-The file is still Markdown, with the same summary above it — it just puts the grid
-in the form a chart plugin understands, so it can sit beside charts written by hand
-instead of having to be copied across. `grid` and `obsidian` are accepted as names
-for it too.
+The file is still Markdown, with the same summary above it. `grid` and `obsidian`
+are accepted as names for it too.
+
+omacap writes what the plugin actually parses, which is stricter than it looks.
+A bar is read as chords only if *all* of it matches the plugin's chord grammar,
+and as **rhythm** otherwise - so an invalid bar is not ignored, it is drawn as
+something else entirely. Three consequences:
+
+| Where a plain chart writes | a chordgrid gets | because |
+| --- | --- | --- |
+| `Em?` | `Em` | `?` is not in the grammar. The uncertain bars are named in the text above the grids instead. |
+| `N.C.` | `-1` | there is no "no chord" notation, so the bar is written as the rest it is. |
+| `C G` | `C / G` | two chords in a bar are separated by a slash *with* spaces. Without them, `C/G` means C with G in the bass. |
+
+The slash form draws two chords as half a bar each, which is a lie if the chord
+changed on the last beat. Where a bar's chords do not divide it evenly, their
+real lengths are written as note values - `C[2.] G[4]` is three beats then one -
+and that is checked against the metre, so `Am[4] D[2]` is what the same split
+looks like in 3/4.
+
+### Sections
+
+Each part of the song gets its own grid, with a label above it in plain markdown,
+because the plugin has no notation for a section label:
+
+````markdown
+**Intro** · bars 1–5
+**A** · bars 6–30 · played 3 times
+**Bars 56–63**
+````
+
+The letters say which parts are the same as each other. They are **not** named
+"verse" and "chorus": that was tried and does not survive contact with real
+songs - see `CLAUDE.md`. `--no-sections` writes one grid for the whole song.
 
 ### What it can and cannot do
 
