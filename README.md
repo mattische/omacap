@@ -255,10 +255,11 @@ file, so containers such as `.m4a` stay playable.
 ### Other commands
 
 ```bash
-omacap devices    # list capture sources, with the default marked *
-omacap formats    # list output formats
-omacap doctor     # check the installation
-omacap update     # update to the latest version
+omacap devices     # list capture sources, with the default marked *
+omacap formats     # list output formats
+omacap doctor      # check the installation
+omacap update      # update to the latest version
+omacap nowplaying  # show what the media player says is playing
 ```
 
 ### Options
@@ -276,6 +277,50 @@ omacap update     # update to the latest version
 | `-A, --analyze` | *(record)* chart the recording as soon as it stops |
 
 Set `OMACAP_OUTPUT_DIR` to change the default folder permanently.
+
+## Splitting a recording into tracks
+
+Record a playlist in one go, then cut it where the music stopped:
+
+```bash
+omacap split ~/Recordings/omacap/omacap_2026-09-25_08-52-01.wav
+```
+
+```
+source   /home/you/Recordings/omacap/omacap_2026-09-25_08-52-01.wav
+length   23:41
+silences 6 found at or above 0.8s
+
+6 piece(s):
+  01    03:47  track 01
+  02    03:54  track 02
+  ...
+
+written to /home/you/Recordings/omacap
+```
+
+The original is never touched. `--dry-run` shows the plan without writing
+anything, and `--analyze` writes a chord chart for each piece.
+
+| Option | Meaning |
+| --- | --- |
+| `-D, --dir` | where to write the pieces (default: beside the recording) |
+| `--min-gap` | silence this long counts as a track boundary (default 0.8 s) |
+| `--min-track` | anything shorter is not kept (default 20 s) |
+| `--pad` | keep this much either side of a cut (default 0.25 s) |
+| `--threshold` | level below which audio counts as silence (default −60 dB) |
+| `-n, --dry-run` | show what would be written, and write nothing |
+| `-A, --analyze` | chart each piece |
+
+Cuts are made with a stream copy, so nothing is re-encoded and a lossy
+recording does not lose a second generation. The cut lands inside the silence,
+where a few tens of milliseconds either way cannot be heard.
+
+**What it can and cannot tell.** Splitting on silence only works when the player
+leaves a gap. Measured against Spotify with crossfade off, the gap between tracks
+was 2.45 s — plenty. But crossfade, gapless albums and Automix each remove the gap
+by design, and a long silence *inside* a piece will split it. Raise `--min-gap` if
+a track is being cut in half; lower it if a boundary is being missed.
 
 ## Chord charts
 

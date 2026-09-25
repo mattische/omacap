@@ -1,8 +1,10 @@
 # Plan: split a playlist capture into one file per track
 
-Status: **phase 1 done.** `nowplaying.py` and `omacap nowplaying` are built, and
-the offset below has been measured against a real Spotify client. Phases 2-4
-are still to do. Written 2026-09-25.
+Status: **phases 1 and 2 done.** `nowplaying.py`, `timeline.py`, `splitter.py`,
+`omacap nowplaying` and `omacap split` are built, and the offset below has been
+measured against a real Spotify client. Phase 3 (a live timeline during
+recording, so the pieces get their names) and phase 4 are still to do.
+Written 2026-09-25.
 
 The idea: while recording a streaming playlist, read what the player says is
 playing, and at the end cut the single capture into one file per track, named
@@ -186,7 +188,9 @@ The project's existing patterns fit this directly.
   before the first audio, out-of-order events.
 - **`splitter`**: real ffmpeg against synthesised audio. Assert segment count,
   durations, **that the FLAC header is right**, and that stream copy is used
-  wherever it is safe.
+  wherever it is safe. One case found while writing these: asking ffmpeg for a
+  span past the end of a file exits 0 and writes a bare container with no audio,
+  so a cut is only accepted once its duration has been read back.
 - **End to end**: a three-track file with 2.0 s and 0.8 s gaps → expect three
   files with the right lengths and names.
 - **`tools/live_check.py`**: add gaps to `tone_filter` so silence splitting is
@@ -197,7 +201,7 @@ The project's existing patterns fit this directly.
 | Phase | Delivers | De-risks |
 | --- | --- | --- |
 | **1** ✅ | `nowplaying.py` + `omacap nowplaying` | Done. The D-Bus-to-audio delay is measured; see below. |
-| **2** | silence events + `omacap split FILE` | Useful on its own, independent of MPRIS |
+| **2** ✅ | silence events + `omacap split FILE` | Done. Useful on its own, independent of MPRIS |
 | **3** | live timeline + `record --split` with names | The feature itself |
 | **4** | per-segment analysis, TUI prompt, auto-stop | The convenience |
 

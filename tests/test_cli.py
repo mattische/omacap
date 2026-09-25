@@ -735,3 +735,128 @@ def test_nowplaying_mentions_other_players(capsys, busctl):
 def test_nowplaying_without_busctl(capsys, no_busctl):
     assert cli.main(["nowplaying"]) == 1
     assert "busctl" in capsys.readouterr().err
+
+
+# -- split -----------------------------------------------------------------
+
+@pytest.fixture
+def split_recording(tmp_path):
+    """Two 'tracks' with a gap, then trailing silence."""
+    import wave
+
+    import numpy as np
+
+    from synth import SR, song
+
+    audio = np.concatenate([
+        song([(0, ""), (7, ""), (9, "m"), (5, "")], bars=6),
+        np.zeros(int(SR * 2.0), dtype=np.float32),
+        song([(0, ""), (7, ""), (9, "m"), (5, "")], bars=6),
+        np.zeros(int(SR * 5.0), dtype=np.float32),
+    ])
+    path = tmp_path / "playlist.wav"
+    pcm = (audio / max(float(np.abs(audio).max()), 1e-9) * 30000).astype("<i2")
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(SR)
+        handle.writeframes(pcm.tobytes())
+    return path
+
+
+def test_split_writes_one_file_per_track(capsys, split_recording, tmp_path):
+    target = tmp_path / "pieces"
+    assert cli.main(["split", str(split_recording), "-D", str(target),
+                     "--min-track", "5"]) == 0
+    written = sorted(target.glob("*.wav"))
+    assert [p.name for p in written] == ["track 01.wav", "track 02.wav"]
+    out = capsys.readouterr().out
+    assert "2 piece(s)" in out
+    assert "is untouched" in out
+
+
+def test_split_leaves_the_original_alone(split_recording, tmp_path):
+    before = split_recording.read_bytes()
+    cli.main(["split", str(split_recording), "-D", str(tmp_path / "out"),
+              "--min-track", "5"])
+    assert split_recording.read_bytes() == before
+
+
+def test_a_dry_run_writes_nothing(capsys, split_recording, tmp_path):
+    target = tmp_path / "pieces"
+    assert cli.main(["split", str(split_recording), "-D", str(target),
+                     "--min-track", "5", "--dry-run"]) == 0
+    assert not target.exists()
+    assert "Dry run" in capsys.readouterr().out
+
+
+def test_split_writes_beside_the_recording_by_default(split_recording):
+    cli.main(["split", str(split_recording), "--min-track", "5"])
+    assert (split_recording.parent / "track 01.wav").is_file()
+
+
+def test_a_long_min_track_leaves_nothing_and_says_why(capsys, split_recording, tmp_path):
+    assert cli.main(["split", str(split_recording), "-D", str(tmp_path / "out"),
+                     "--min-track", "600"]) == 1
+    out = capsys.readouterr().out
+    assert "Nothing to split" in out
+    assert "--min-track" in out
+
+
+def test_a_long_min_gap_keeps_it_in_one_piece(capsys, split_recording, tmp_path):
+    assert cli.main(["split", str(split_recording), "-D", str(tmp_path / "out"),
+                     "--min-track", "5", "--min-gap", "30"]) == 0
+    assert "Only one piece" in capsys.readouterr().out
+
+
+def test_splitting_a_missing_file(capsys, tmp_path):
+    assert cli.main(["split", str(tmp_path / "gone.wav")]) == 1
+    assert "omacap:" in capsys.readouterr().err
+
+
+def test_split_can_chart_each_piece(capsys, split_recording, tmp_path, monkeypatch):
+    charted = []
+
+    class FakeAnalysis:
+        key = type("K", (), {"short_name": "C"})()
+        meter = type("M", (), {"name": "4/4"})()
+        tempo = 120.0
+        bar_count = 8
+
+    def fake_analyse(path, **kwargs):
+        charted.append(path)
+        return FakeAnalysis()
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", fake_analyse)
+    monkeypatch.setattr("omacap.cli.write_chart", lambda a, target, *rest: target)
+
+    assert cli.main(["split", str(split_recording), "-D", str(tmp_path / "out"),
+                     "--min-track", "5", "--analyze"]) == 0
+    assert len(charted) == 2
+    out = capsys.readouterr().out
+    assert out.count("120 BPM") == 2
+
+
+def test_one_failed_chart_does_not_stop_the_others(capsys, split_recording, tmp_path, monkeypatch):
+    from omacap.analysis.report import AnalysisError
+
+    calls = []
+
+    def flaky(path, **kwargs):
+        calls.append(path)
+        if len(calls) == 1:
+            raise AnalysisError("no steady beat found")
+        return type("A", (), {
+            "key": type("K", (), {"short_name": "C"})(),
+            "meter": type("M", (), {"name": "4/4"})(),
+            "tempo": 120.0, "bar_count": 8,
+        })()
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", flaky)
+    monkeypatch.setattr("omacap.cli.write_chart", lambda a, target, *rest: target)
+
+    assert cli.main(["split", str(split_recording), "-D", str(tmp_path / "out"),
+                     "--min-track", "5", "--analyze"]) == 0
+    captured = capsys.readouterr()
+    assert "not charted" in captured.err
+    assert "120 BPM" in captured.out

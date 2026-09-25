@@ -11,10 +11,11 @@ import time
 from pathlib import Path
 
 from . import __version__
-from . import nowplaying
+from . import nowplaying, splitter, timeline
 from .analysis import AnalysisUnavailable
 from .analysis.audio import DecodeError
 from .analysis.report import AnalysisError
+from .splitter import SplitError
 from .devices import AudioSystemError, list_monitors, list_sources, resolve_source
 from .updater import (
     UpdateError,
@@ -62,6 +63,7 @@ examples:
   omacap record -d 60 -A        record a minute, then chart it straight away
   omacap update                 install the latest version
   omacap nowplaying             show what the media player is playing
+  omacap split mix.wav          cut a recording into one file per track
 """
 
 
@@ -150,6 +152,48 @@ def build_parser() -> argparse.ArgumentParser:
         "--check", action="store_true",
         help="only report whether an update is available",
     )
+
+    splitting = subparsers.add_parser(
+        "split",
+        help="cut a recording into one file per track, on the silences",
+        description=(
+            "Split a recording wherever the audio goes quiet for long enough. "
+            "Without a track history there are no names to use, so the files are "
+            "numbered; record with --split to get names from the media player."
+        ),
+    )
+    splitting.add_argument("file", help="recording to split")
+    splitting.add_argument(
+        "-D", "--dir", metavar="PATH",
+        help="where to write the pieces (default: beside the recording)",
+    )
+    splitting.add_argument(
+        "--min-gap", type=float, default=timeline.DEFAULT_MIN_GAP, metavar="SECONDS",
+        help=f"silence this long counts as a track boundary "
+             f"(default: {timeline.DEFAULT_MIN_GAP})",
+    )
+    splitting.add_argument(
+        "--min-track", type=float, default=timeline.DEFAULT_MIN_TRACK, metavar="SECONDS",
+        help=f"anything shorter is not kept (default: {timeline.DEFAULT_MIN_TRACK:g})",
+    )
+    splitting.add_argument(
+        "--pad", type=float, default=timeline.DEFAULT_PAD, metavar="SECONDS",
+        help=f"keep this much either side of a cut (default: {timeline.DEFAULT_PAD})",
+    )
+    splitting.add_argument(
+        "--threshold", type=float, default=splitter.DEFAULT_THRESHOLD_DB, metavar="DB",
+        help=f"level below which audio counts as silence "
+             f"(default: {splitter.DEFAULT_THRESHOLD_DB:g})",
+    )
+    splitting.add_argument(
+        "-n", "--dry-run", action="store_true",
+        help="show what would be written without writing it",
+    )
+    splitting.add_argument(
+        "-A", "--analyze", "--analyse", dest="analyze", action="store_true",
+        help="write a chord chart for each piece",
+    )
+    _add_analysis_options(splitting)
 
     watching = subparsers.add_parser(
         "nowplaying",
@@ -241,9 +285,11 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_update(args)
         if args.command == "nowplaying":
             return cmd_nowplaying(args)
+        if args.command == "split":
+            return cmd_split(args)
         return cmd_tui(args)
     except (AudioSystemError, RecorderError, AnalysisError, AnalysisUnavailable,
-            DecodeError, ValueError) as exc:
+            DecodeError, SplitError, ValueError) as exc:
         print(f"omacap: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
@@ -452,6 +498,74 @@ def print_update_notice() -> None:
         return
     if status is not None:
         print(f"omacap: {notice_line(status)}", file=sys.stderr)
+
+
+def cmd_split(args: argparse.Namespace) -> int:
+    source = Path(args.file).expanduser()
+    duration = splitter.probe_duration(source)
+    silences = splitter.detect_silences(
+        source, threshold_db=args.threshold, min_gap=min(args.min_gap, 0.3),
+        duration=duration,
+    )
+    segments = timeline.plan_from_silence(
+        duration, silences,
+        min_gap=args.min_gap, min_track=args.min_track, pad=args.pad,
+    )
+
+    print(f"source   {source}")
+    print(f"length   {format_duration(duration)}")
+    print(f"silences {len(silences)} found at or above {args.min_gap:g}s")
+    if not segments:
+        print("\nNothing to split: no piece was long enough to be a track.")
+        print(f"Try a smaller --min-track (currently {args.min_track:g}s) "
+              f"or a smaller --min-gap (currently {args.min_gap:g}s).")
+        return 1
+
+    print(f"\n{len(segments)} piece(s):")
+    for segment in segments:
+        print(f"  {segment.index:02d}  {format_duration(segment.duration):>7}  "
+              f"{sanitize_basename(segment.basename())}")
+    if len(segments) == 1:
+        print("\nOnly one piece — there was nothing that looked like a track break.")
+
+    if args.dry_run:
+        print("\nDry run; nothing written.")
+        return 0
+
+    directory = Path(args.dir).expanduser() if args.dir else source.parent
+    written = splitter.split(source, segments, directory)
+    print(f"\nwritten to {directory}")
+    for path in written:
+        print(f"  {path.name}")
+    print(f"\n{source.name} is untouched.")
+
+    if args.analyze:
+        return _analyse_many(written, args)
+    return 0
+
+
+def _analyse_many(paths: list[Path], args: argparse.Namespace) -> int:
+    """Chart each piece. One failure must not lose the rest."""
+    from .analysis.report import analyse_file
+
+    chart_format = get_chart_format(args.chart_format) if args.chart_format else "md"
+    failures = 0
+    print()
+    for path in paths:
+        try:
+            analysis = analyse_file(path, vocabulary=args.chords)
+        except (AnalysisError, AnalysisUnavailable, DecodeError) as exc:
+            print(f"  {path.name}: not charted ({exc})", file=sys.stderr)
+            failures += 1
+            continue
+        target = write_chart(
+            analysis, default_chart_path(path, chart_format),
+            chart_format, args.bars_per_line,
+        )
+        print(f"  {target.name}: {analysis.key.short_name}, "
+              f"{analysis.tempo:.0f} BPM, {analysis.meter.name}, "
+              f"{analysis.bar_count} bars")
+    return 1 if failures == len(paths) else 0
 
 
 def cmd_nowplaying(args: argparse.Namespace) -> int:
