@@ -107,6 +107,37 @@ def find_installation() -> Installation:
     return Installation(checkout=None, managed=False)
 
 
+def running_launcher() -> Path | None:
+    """The ``omacap`` command belonging to the interpreter now running."""
+    candidate = Path(sys.executable).resolve().parent / "omacap"
+    return candidate if candidate.exists() else None
+
+
+def launchers_on_path() -> list[Path]:
+    """Every ``omacap`` command reachable on PATH, in the order PATH gives them.
+
+    More than one means whichever comes first wins, which is worth saying out
+    loud when someone has installed omacap twice.
+    """
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        candidate = Path(entry) / "omacap"
+        try:
+            if not (candidate.is_file() and os.access(candidate, os.X_OK)):
+                continue
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        found.append(candidate)
+    return found
+
+
 # -- git helpers ----------------------------------------------------------
 
 def _git(root: Path, *args: str, timeout: float = GIT_TIMEOUT) -> subprocess.CompletedProcess:

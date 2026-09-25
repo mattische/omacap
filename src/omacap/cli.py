@@ -19,9 +19,11 @@ from .updater import (
     apply_update,
     check_now,
     find_installation,
+    launchers_on_path,
     local_revision,
     notice_line,
     pending_update,
+    running_launcher,
 )
 from .analysis.chords import DEFAULT_VOCABULARY, VOCABULARIES
 from .formats import DEFAULT_FORMAT, FORMAT_NAMES, FORMATS, get_format
@@ -526,6 +528,7 @@ def cmd_doctor() -> int:
     else:
         print(f"[--] install   {installation.description}; "
               f"'omacap update' is unavailable")
+    ok &= _report_launchers()
 
     # Optional: only needed for 'omacap analyze', so it never fails the check.
     try:
@@ -539,6 +542,30 @@ def cmd_doctor() -> int:
 
     print("\n" + ("Everything looks good." if ok else "Some checks failed - see above."))
     return 0 if ok else 1
+
+
+def _report_launchers() -> bool:
+    """Say which omacap the shell would run, and flag a second installation."""
+    on_path = launchers_on_path()
+    running = running_launcher()
+
+    if not on_path:
+        hint = f" Add {running.parent} to your PATH." if running else ""
+        print(f"[--] command   'omacap' is not on your PATH.{hint}")
+        return True          # it clearly ran anyway, so not a failure
+
+    first = on_path[0]
+    print(f"[ok] command   {first}")
+
+    if running is not None and first.resolve() != running.resolve():
+        print(f"[--] conflict  this is {running}, but your shell would run "
+              f"{first}")
+    if len(on_path) > 1:
+        print(f"[--] duplicate {len(on_path)} installations on PATH; "
+              f"the first one wins:")
+        for launcher in on_path:
+            print(f"               {launcher} -> {launcher.resolve()}")
+    return True
 
 
 def _can_write(directory: Path) -> bool:

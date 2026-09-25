@@ -63,6 +63,38 @@ Nothing to install. `ffmpeg` comes in as a dependency of `omacut` and `mpv`, and
 `pactl` comes in with `pipewire-pulse` via `libpulse`, so a stock Omarchy machine
 already has everything. Run `omacap doctor` to confirm.
 
+### Already installed it once?
+
+`omacap doctor` says which copy your shell would actually run, and warns if a
+second one is shadowing it:
+
+```
+[ok] install   managed at /home/you/.local/share/omacap/src (eb1431a)
+[ok] command   /home/you/.local/bin/omacap
+```
+
+If you installed earlier by cloning by hand, that clone already updates itself
+with `omacap update` — there is nothing to redo. Reinstall with the script only
+if you want the managed layout and the `~/.local/bin/omacap` command; then remove
+the old copy so two do not compete:
+
+```bash
+rm -rf /path/to/the/old/clone          # or just its .venv
+hash -r                                # let the shell forget the old path
+omacap doctor
+```
+
+### Recording over SSH
+
+omacap records the sound card of the machine it runs on. Over SSH that is the
+**remote** machine, not the one you are sitting at — so it captures what is
+playing over there. `omacap devices` names the host's outputs if you need to
+check which machine you are pointed at.
+
+It does work over SSH: when `XDG_RUNTIME_DIR` is unset, as it often is in a
+non-graphical session, omacap falls back to `/run/user/$UID` to reach the audio
+server.
+
 ### Moving between machines
 
 omacap looks its environment up at runtime rather than assuming anything: the

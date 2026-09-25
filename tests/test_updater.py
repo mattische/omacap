@@ -356,3 +356,61 @@ def test_a_cache_without_a_checkout_is_still_accepted(checkout, remote_repo, cac
     )
     monkeypatch.setattr(updater, "start_background_check", lambda: None)
     assert pending_update() is not None
+
+
+# -- finding other installations ------------------------------------------
+
+def _make_launcher(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    launcher = directory / "omacap"
+    launcher.write_text("#!/bin/sh\n")
+    launcher.chmod(0o755)
+    return launcher
+
+
+def test_launchers_are_found_in_path_order(tmp_path, monkeypatch):
+    first = _make_launcher(tmp_path / "first")
+    second = _make_launcher(tmp_path / "second")
+    monkeypatch.setenv("PATH", f"{first.parent}:{second.parent}")
+    assert updater.launchers_on_path() == [first, second]
+
+
+def test_a_path_without_omacap_finds_nothing(tmp_path, monkeypatch):
+    (tmp_path / "empty").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert updater.launchers_on_path() == []
+
+
+def test_the_same_install_reached_twice_is_listed_once(tmp_path, monkeypatch):
+    real = _make_launcher(tmp_path / "real")
+    link_dir = tmp_path / "link"
+    link_dir.mkdir()
+    (link_dir / "omacap").symlink_to(real)
+    monkeypatch.setenv("PATH", f"{real.parent}:{link_dir}")
+    assert updater.launchers_on_path() == [real]
+
+
+def test_a_non_executable_file_is_not_a_launcher(tmp_path, monkeypatch):
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    (directory / "omacap").write_text("not executable")
+    monkeypatch.setenv("PATH", str(directory))
+    assert updater.launchers_on_path() == []
+
+
+def test_an_empty_path_is_handled(monkeypatch):
+    monkeypatch.setenv("PATH", "")
+    assert updater.launchers_on_path() == []
+
+
+def test_the_running_launcher_sits_beside_the_interpreter(tmp_path, monkeypatch):
+    venv_bin = tmp_path / "venv" / "bin"
+    launcher = _make_launcher(venv_bin)
+    monkeypatch.setattr(updater.sys, "executable", str(venv_bin / "python"))
+    assert updater.running_launcher() == launcher
+
+
+def test_no_running_launcher_when_there_is_none(tmp_path, monkeypatch):
+    (tmp_path / "bin").mkdir()
+    monkeypatch.setattr(updater.sys, "executable", str(tmp_path / "bin" / "python"))
+    assert updater.running_launcher() is None

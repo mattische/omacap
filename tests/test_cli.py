@@ -612,3 +612,58 @@ def test_version_without_a_revision(capsys, monkeypatch):
         cli.main(["--version"])
     out = capsys.readouterr().out
     assert "omacap" in out and "(" not in out
+
+
+# -- doctor: which omacap would actually run -------------------------------
+
+def _launcher(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "omacap"
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return path
+
+
+def test_doctor_names_the_command_the_shell_would_run(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    launcher = _launcher(tmp_path / "bin")
+    monkeypatch.setattr(cli, "launchers_on_path", lambda: [launcher])
+    monkeypatch.setattr(cli, "running_launcher", lambda: launcher)
+    monkeypatch.setenv("OMACAP_OUTPUT_DIR", str(tmp_path / "recordings"))
+    cli.main(["doctor"])
+    assert f"command   {launcher}" in capsys.readouterr().out
+
+
+def test_doctor_warns_when_omacap_is_not_on_path(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "launchers_on_path", lambda: [])
+    monkeypatch.setattr(cli, "running_launcher", lambda: _launcher(tmp_path / "venv"))
+    monkeypatch.setenv("OMACAP_OUTPUT_DIR", str(tmp_path / "recordings"))
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "not on your PATH" in out
+    assert str(tmp_path / "venv") in out
+    assert "Everything looks good" in out      # not being on PATH is not a failure
+
+
+def test_doctor_flags_a_second_installation(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    """Two installs on PATH is exactly the confusion worth naming."""
+    first = _launcher(tmp_path / "managed")
+    second = _launcher(tmp_path / "old-clone")
+    monkeypatch.setattr(cli, "launchers_on_path", lambda: [first, second])
+    monkeypatch.setattr(cli, "running_launcher", lambda: first)
+    monkeypatch.setenv("OMACAP_OUTPUT_DIR", str(tmp_path / "recordings"))
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "2 installations on PATH" in out
+    assert str(first) in out and str(second) in out
+
+
+def test_doctor_flags_running_a_different_copy_than_path_would(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    on_path = _launcher(tmp_path / "managed")
+    running = _launcher(tmp_path / "dev-clone")
+    monkeypatch.setattr(cli, "launchers_on_path", lambda: [on_path])
+    monkeypatch.setattr(cli, "running_launcher", lambda: running)
+    monkeypatch.setenv("OMACAP_OUTPUT_DIR", str(tmp_path / "recordings"))
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "conflict" in out
+    assert str(running) in out and str(on_path) in out

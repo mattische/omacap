@@ -162,6 +162,15 @@ gets a `-f null` metering probe before any recording. If you extend it and forge
 those branches, it treats `-encoders` as an output filename and records into it
 until the 15 s probe timeout — which shows up as the whole suite crawling.
 
+## Two installs on one machine
+
+The update cache lives once per user (`~/.cache/omacap/`) but installs are
+per-directory, so a cached status records which checkout it was about and is
+discarded when it belongs to another. `doctor` reports which launcher PATH would
+pick, flags a second one shadowing it, and flags running a different copy than
+PATH would choose — this is the confusion people actually hit after installing
+twice.
+
 ## Layout
 
 ```
