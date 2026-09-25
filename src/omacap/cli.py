@@ -276,6 +276,10 @@ def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
         "--bars-per-line", type=int, default=BARS_PER_LINE, metavar="N",
         help=f"bars per line in the chart (default: {BARS_PER_LINE})",
     )
+    parser.add_argument(
+        "--no-collapse", dest="collapse", action="store_false",
+        help="write every bar out instead of collapsing repeated phrases",
+    )
 
 
 def _add_common(parser: argparse.ArgumentParser, suppress: bool = False) -> None:
@@ -507,6 +511,7 @@ def _analyse_recording(path: Path, args: argparse.Namespace, quiet: bool = False
         default_chart_path(path, chart_format),
         chart_format,
         args.bars_per_line,
+        args.collapse,
     )
     if quiet:
         print(target)
@@ -595,14 +600,16 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         if args.to_stdout:
             if index:
                 print()
-            print(render(analysis, chart_format, args.bars_per_line))
+            print(render(analysis, chart_format, args.bars_per_line,
+                         args.collapse))
             continue
 
         target = (
             Path(args.output).expanduser() if args.output
             else default_chart_path(source, chart_format)
         )
-        write_chart(analysis, target, chart_format, args.bars_per_line)
+        write_chart(analysis, target, chart_format, args.bars_per_line,
+                    args.collapse)
         _print_analysis_summary(analysis, target)
         if len(sources) > 1:
             print()
@@ -737,7 +744,7 @@ def _analyse_many(paths: list[Path], args: argparse.Namespace) -> int:
             continue
         target = write_chart(
             analysis, default_chart_path(path, chart_format),
-            chart_format, args.bars_per_line,
+            chart_format, args.bars_per_line, args.collapse,
         )
         print(f"  {target.name}: {analysis.key.short_name}, "
               f"{analysis.tempo:.0f} BPM, {analysis.meter.name}, "

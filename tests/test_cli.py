@@ -247,7 +247,8 @@ def test_the_simple_vocabulary_writes_only_triads(capsys, recording):
 
 
 def test_bars_per_line_is_configurable(capsys, recording):
-    cli.main(["analyze", str(recording), "--bars-per-line", "2", "--print"])
+    cli.main(["analyze", str(recording), "--bars-per-line", "2",
+              "--no-collapse", "--print"])
     grid = capsys.readouterr().out.split("```")[1].strip().splitlines()
     assert len(grid) == 6          # 12 bars, two per line
 

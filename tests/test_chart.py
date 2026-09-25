@@ -80,19 +80,19 @@ def test_the_summary_covers_everything_that_was_asked_for(analysis):
 
 
 def test_the_grid_has_one_line_per_four_bars(analysis):
-    lines = chart_lines(analysis, bars_per_line=4)
+    lines = chart_lines(analysis, bars_per_line=4, collapse=False)
     assert len(lines) == 4
     assert lines[0].startswith(" 1 |")
     assert lines[1].startswith(" 5 |")
 
 
 def test_bars_per_line_is_configurable(analysis):
-    assert len(chart_lines(analysis, bars_per_line=8)) == 2
-    assert len(chart_lines(analysis, bars_per_line=2)) == 8
+    assert len(chart_lines(analysis, bars_per_line=8, collapse=False)) == 2
+    assert len(chart_lines(analysis, bars_per_line=2, collapse=False)) == 8
 
 
 def test_grid_cells_line_up(analysis):
-    lines = chart_lines(analysis, bars_per_line=4)
+    lines = chart_lines(analysis, bars_per_line=4, collapse=False)
     assert len({len(line) for line in lines}) == 1
 
 
@@ -281,7 +281,8 @@ def test_a_chordgrid_block_is_written(analysis):
 def test_chordgrid_bars_are_written_between_pipes(analysis):
     from omacap.chart import chordgrid_lines
 
-    rows = [l for l in chordgrid_lines(analysis) if l.startswith("| ")]
+    rows = [l for l in chordgrid_lines(analysis, collapse=False)
+            if l.startswith("| ")]
     assert rows, "expected some bar rows"
     for row in rows:
         assert row.startswith("| ") and row.endswith(" |")
@@ -310,3 +311,48 @@ def test_a_song_with_no_bars_still_makes_a_block():
 
     lines = chordgrid_lines(Empty())
     assert lines[0] == "```chordgrid" and lines[-1] == "```"
+
+
+# -- collapsing repeats ---------------------------------------------------
+
+def test_a_repeated_phrase_is_written_once(analysis):
+    # The fixture is one four-bar loop over and over, so it collapses to a
+    # single row however long the song is.
+    collapsed = chart_lines(analysis)
+    assert len(collapsed) < len(chart_lines(analysis, collapse=False))
+
+
+def test_the_collapsed_row_says_how_many_times(analysis):
+    text = "\n".join(chart_lines(analysis))
+    assert "×" in text
+
+
+def test_collapsing_never_makes_a_chart_longer(analysis):
+    assert len(chart_lines(analysis)) <= len(chart_lines(analysis, collapse=False))
+
+
+def test_collapsed_lines_still_line_up(analysis):
+    assert len({len(line) for line in chart_lines(analysis)}) == 1
+
+
+def test_no_collapse_writes_every_bar(analysis):
+    text = "\n".join(chart_lines(analysis, collapse=False))
+    assert "×" not in text
+    assert len(chart_lines(analysis, collapse=False)) == (len(analysis.bars) + 3) // 4
+
+
+def test_a_collapsed_chordgrid_brackets_the_phrase_with_repeat_marks(analysis):
+    from omacap.chart import chordgrid_lines
+
+    rows = [l for l in chordgrid_lines(analysis) if "|" in l and "chordgrid" not in l]
+    assert any(l.startswith("||:") for l in rows)
+    assert any(":||" in l for l in rows)
+
+
+def test_the_form_is_named_above_the_chart(analysis):
+    assert "Form: A" in render_markdown(analysis)
+    assert "Form: A" in render_text(analysis)
+
+
+def test_no_collapse_leaves_the_form_out(analysis):
+    assert "Form:" not in render(analysis, "md", collapse=False)

@@ -94,6 +94,9 @@ the relevant tests; they encode the ground truth.
 | `analysis/tempo.py` | `PRIOR_WIDTH_OCTAVES = 1.0` | Log-normal prior around 120 BPM. Necessary but not sufficient: see octave handling below. |
 | `analysis/meter.py` | `COMPOUND_MIDBAR_RATIO = 0.90` | Measured accent medians: true 3/4 gives 0.99–1.00, true 6/8 gives 0.78–0.81. Computed on accents *only* — a chord lasting two bars makes the harmony look like six either way. |
 | `analysis/report.py` | `DOMINANT_SHARE = 0.62` | A chord holding more than this much of a bar is written alone. |
+| `analysis/structure.py` | `PHRASE_LENGTHS = (8, 4)` | Phrase lengths looked for, longest first. Adding 2 made charts *longer*: a two-bar phrase saves one row and costs a line break at each end. Measured on five recordings, `(8, 4)` turned 35 rows into 22 on one and never made any of them worse. |
+| `chart.py` | collapsing falls back to flat | A phrase starts its own line, so a short one can cost more rows than writing it out twice. `_layout` builds both and returns the shorter, which makes "never longer" a property of the code rather than of the tuning. |
+| `chart.py` | short rows padded with space, not empty cells | A phrase boundary leaves a row holding fewer than four bars. Padding it with `\|` cells would read as bars that are not there. |
 
 ## Traps already hit and fixed
 
@@ -293,6 +296,8 @@ src/omacap/
     meter.py      time signature, downbeat phase, bar grid
     chords.py     templates, beat-synchronous matching, Viterbi
     key.py        Krumhansl-Schmuckler plus chord evidence
+    rhythm.py     subdivision profile; straight, swung or shuffled feel
+    structure.py  repeated phrases, so a chart writes a verse once
     report.py     orchestration; bars and their chords
 tools/
   live_check.py   manual end-to-end check against the real sound card

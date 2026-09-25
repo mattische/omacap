@@ -487,6 +487,7 @@ In the interactive interface, press **a** after a take to do the same thing, and
 | `-t, --chart-format` | `md`, `txt` or `chordgrid` (default: `md`, or taken from `--output`) |
 | `-c, --chords` | vocabulary: `simple`, `standard` (default) or `full` |
 | `--bars-per-line` | bars per line in the grid (default: 4) |
+| `--no-collapse` | write every bar out instead of collapsing repeated phrases |
 | `-p, --print` | print the chart instead of writing a file |
 
 The chord vocabulary is the setting worth knowing about:
@@ -514,6 +515,32 @@ half of the places the analysis disagreed with the chart — four times what pic
 bars at random would manage. If you are going to check the chart against your ears,
 these are the bars to start with.
 
+### Repeated phrases are written once
+
+Songs repeat, and a chart that writes a verse out three times is three times as
+long as it needs to be. omacap looks for phrases of eight or four bars played
+more than once in a row and writes them once, with a letter and the number of
+times to play them:
+
+```
+Form: A×3 B×2 C×2 C×2 B×2 A×2 B×2 D×3.
+
+  6 | C       | Em      | D       | D       |
+    | C       | Em      | D       | D       |  A×3
+ 30 | D?      |
+ 31 | Em      | C       | Am      | C       |
+    | D       | D       | D       | Am      |  B×2
+```
+
+On one 139-bar recording that turns 35 rows into 22, and the `B` it finds is the
+chorus its players wrote down. In a `chordgrid` chart the same phrases come out
+bracketed by repeat marks, `||: ... :||`, which is how a chart says it anyway.
+
+A phrase starts a new line, so a short one can cost more rows than writing it out
+twice would. When that happens omacap writes it out — the chart never comes back
+longer than it was. `--no-collapse` turns it off entirely, and the form line then
+goes away with it.
+
 ### Writing into Obsidian
 
 `--chart-format chordgrid` writes the chart as a `chordgrid` block, which Obsidian
@@ -529,8 +556,8 @@ measure-num
 
 4/4
 
-| C | Em | D | D |
-| C | Em | D | D |
+||: C | Em | D | D |
+| C | Em | D | D :||   A×3
 ```
 ````
 

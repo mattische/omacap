@@ -56,7 +56,71 @@ def bar_text(bar, uncertain: set[int]) -> str:
     return bar.label + (UNCERTAIN_MARK if bar.number in uncertain else "")
 
 
-def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE) -> list[str]:
+def _layout(analysis, bars_per_line: int, collapse: bool):
+    """Group the bars into the rows a chart is written in.
+
+    Each row is (bar number or None, the bars on it, the note at its end, the
+    repeat mark). A phrase written more than once is given its own rows, a note
+    saying how often, and repeat marks around it: a long phrase spans several
+    rows, so the marks open on the first and close on the last.
+    """
+    from .analysis.structure import find_phrases
+
+    bars = analysis.bars
+    flat = [
+        (bars[i].number, bars[i: i + bars_per_line], "", "")
+        for i in range(0, len(bars), bars_per_line)
+    ]
+    if not collapse:
+        return flat
+
+    rows = []
+    loose: list = []
+
+    def flush():
+        for i in range(0, len(loose), bars_per_line):
+            chunk = loose[i: i + bars_per_line]
+            rows.append((chunk[0].number, chunk, "", ""))
+        loose.clear()
+
+    for phrase in find_phrases(bars):
+        if not phrase.repeated:
+            loose.extend(phrase.bars)
+            continue
+        flush()
+        note = f"{phrase.letter}\u00d7{phrase.repeats}".strip()
+        pieces = [
+            phrase.bars[i: i + bars_per_line]
+            for i in range(0, phrase.length, bars_per_line)
+        ]
+        for index, chunk in enumerate(pieces):
+            first = index == 0
+            last = index == len(pieces) - 1
+            mark = ("both" if first and last
+                    else "open" if first else "close" if last else "mid")
+            rows.append((chunk[0].number if first else None, chunk,
+                         note if last else "", mark))
+    flush()
+    # A phrase boundary breaks the line, so a short phrase can cost more rows
+    # than writing it out twice would. When that happens, write it out.
+    return rows if len(rows) < len(flat) else flat
+
+
+def _form_note(analysis, rows: list) -> list[str]:
+    """One line naming the song's form, when the chart is written that way."""
+    if not any(note for _, _, note, _ in rows):
+        return []
+    from .analysis.structure import find_phrases, form
+
+    shape = form(find_phrases(analysis.bars))
+    if not shape:
+        return []
+    return [f"Form: {shape}. A repeated phrase is written once, "
+            f"with the number of times to play it."]
+
+
+def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE,
+                collapse: bool = True) -> list[str]:
     """The chart grid: bar numbers down the left, chords across."""
     bars = analysis.bars
     if not bars:
@@ -66,16 +130,26 @@ def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE) -> list[str]:
     texts = {bar.number: bar_text(bar, uncertain) for bar in bars}
     width = max(max((len(t) for t in texts.values()), default=4), 6)
     number_width = len(str(len(bars)))
+    rows = _layout(analysis, bars_per_line, collapse)
+    note_width = max((len(note) for _, _, note, _ in rows), default=0)
+
+    # A phrase boundary forces a line break, so some lines hold fewer bars than
+    # others. They are padded with space rather than with empty cells, which would
+    # read as bars that are not there.
+    cell_width = width + 3
+    full_row = cell_width * bars_per_line
 
     lines = []
-    for start in range(0, len(bars), bars_per_line):
-        row = bars[start: start + bars_per_line]
+    for number, row, note, _ in rows:
         cells = "".join(f" {texts[bar.number].ljust(width)} |" for bar in row)
-        lines.append(f"{str(row[0].number).rjust(number_width)} |{cells}")
+        label = "" if number is None else str(number)
+        tail = f"  {note.ljust(note_width)}" if note_width else ""
+        lines.append(f"{label.rjust(number_width)} |{cells.ljust(full_row)}{tail}")
     return lines
 
 
-def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE) -> list[str]:
+def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
+                    collapse: bool = True) -> list[str]:
     """The chart as a chordgrid block, which Obsidian renders as a chart.
 
     The format a working musician's notes are already in: a time signature, then
@@ -88,9 +162,15 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE) -> list[str]:
 
     uncertain = getattr(analysis, "uncertain_bars", set())
     lines = ["```chordgrid", "measure-num", "", analysis.meter.name, ""]
-    for start in range(0, len(bars), bars_per_line):
-        row = bars[start: start + bars_per_line]
-        lines.append("| " + " | ".join(bar_text(bar, uncertain) for bar in row) + " |")
+    for _, row, note, mark in _layout(analysis, bars_per_line, collapse):
+        cells = " | ".join(bar_text(bar, uncertain) for bar in row)
+        # Repeat marks are how a chart says this twice, and the count says how
+        # many times. A phrase wider than one row opens on the first and closes
+        # on the last, so the marks bracket the whole phrase.
+        left = "||:" if mark in ("open", "both") else "|"
+        right = ":||" if mark in ("close", "both") else "|"
+        tail = f"   {note}" if note else ""
+        lines.append(f"{left} {cells} {right}{tail}")
     lines.append("```")
     return lines
 
@@ -144,7 +224,7 @@ FOOTER = (
 
 
 def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
-                    grid: bool = False) -> str:
+                    grid: bool = False, collapse: bool = True) -> str:
     """A Markdown chart, with the grid kept in a code block so it stays aligned."""
     rows = summary_rows(analysis)
     lines = [f"# {analysis.source.stem}", "", "| | |", "| --- | --- |"]
@@ -152,6 +232,7 @@ def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
         lines.append(f"| **{label}** | {value} |")
     lines += ["", "## Chart", ""]
     lines.append(f"Bars read left to right, {bars_per_line} per line.")
+    lines += _form_note(analysis, _layout(analysis, bars_per_line, collapse))
     if getattr(analysis, "uncertain_bars", set()):
         lines.append(
             f"A `{UNCERTAIN_MARK}` marks a bar the audio matched less well than "
@@ -159,14 +240,15 @@ def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
         )
     lines.append("")
     if grid:
-        lines += chordgrid_lines(analysis, bars_per_line)
+        lines += chordgrid_lines(analysis, bars_per_line, collapse)
     else:
-        lines += ["```"] + chart_lines(analysis, bars_per_line) + ["```"]
+        lines += ["```"] + chart_lines(analysis, bars_per_line, collapse) + ["```"]
     lines += ["", "---", "", FOOTER, ""]
     return "\n".join(lines)
 
 
-def render_text(analysis, bars_per_line: int = BARS_PER_LINE) -> str:
+def render_text(analysis, bars_per_line: int = BARS_PER_LINE,
+                collapse: bool = True) -> str:
     """A plain-text chart."""
     title = analysis.source.stem
     rows = summary_rows(analysis)
@@ -174,18 +256,22 @@ def render_text(analysis, bars_per_line: int = BARS_PER_LINE) -> str:
     lines = [title, "=" * len(title), ""]
     for label, value in rows:
         lines.append(f"{label.ljust(label_width)}  {value}")
-    lines += ["", "CHART", "-----", f"Bars read left to right, {bars_per_line} per line.", ""]
-    lines += chart_lines(analysis, bars_per_line)
+    lines += ["", "CHART", "-----",
+              f"Bars read left to right, {bars_per_line} per line."]
+    lines += _form_note(analysis, _layout(analysis, bars_per_line, collapse)) + [""]
+    lines += chart_lines(analysis, bars_per_line, collapse)
     lines += ["", FOOTER, ""]
     return "\n".join(lines)
 
 
-def render(analysis, chart_format: str = DEFAULT_CHART_FORMAT, bars_per_line: int = BARS_PER_LINE) -> str:
+def render(analysis, chart_format: str = DEFAULT_CHART_FORMAT,
+           bars_per_line: int = BARS_PER_LINE, collapse: bool = True) -> str:
     """Render in the requested format."""
     wanted = get_chart_format(chart_format)
     if wanted == "txt":
-        return render_text(analysis, bars_per_line)
-    return render_markdown(analysis, bars_per_line, grid=wanted == "chordgrid")
+        return render_text(analysis, bars_per_line, collapse)
+    return render_markdown(analysis, bars_per_line,
+                           grid=wanted == "chordgrid", collapse=collapse)
 
 
 def write_chart(
@@ -193,11 +279,13 @@ def write_chart(
     path: Path,
     chart_format: str = DEFAULT_CHART_FORMAT,
     bars_per_line: int = BARS_PER_LINE,
+    collapse: bool = True,
 ) -> Path:
     """Write the chart to ``path``."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render(analysis, chart_format, bars_per_line), encoding="utf-8")
+    path.write_text(render(analysis, chart_format, bars_per_line, collapse),
+                    encoding="utf-8")
     return path
 
 
