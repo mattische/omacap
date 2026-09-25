@@ -29,16 +29,20 @@ WHAT IS NOT SETTLED: whether it is the bass being tracked, on any given mix.
 Judged by how often the bar's tracked note is the chord root - a floor, not a
 target, since a bass legitimately leaves the root:
 
-    MEDS sessionmix          78%    misses spread thinly, no systematic error
+    MEDS sessionmix          79%    misses spread thinly, no systematic error
     The Last Song            73%
-    So Gung Ho               58%
-    Cabrillos                26%    errors smeared across every interval
-    En psalm                 35%
+    So Gung Ho               66%
+    En psalm                 43%
+    Cabrillos                34%    errors smeared across every interval
+
+(An earlier version of this file reported 78/73/58/35/26%. Those were measured
+against untrimmed audio while the bar times come from the trimmed analysis - 3.4
+seconds out on MEDS. The numbers above are with that fixed; the picture is the
+same but it was understated by five to eight points.)
 
 On the three studio mixes this is a working tracker. On the other two it is not,
 and the errors are not one fixable failure mode - not octaves, not fifths, but
-spread, with about half of them within a semitone of the root. So something other
-than the bass is being followed part of the time.
+spread. So something other than the bass is being followed part of the time.
 
 RHYTHM: the pitch side is good down to sixteenths, but a bass *onset* sits in the
 same band as the kick drum, and separating them is the same unsolved problem
@@ -208,7 +212,7 @@ def _root_of(label: str) -> int | None:
 def recordings(paths: list[Path]) -> int:
     import numpy as np
 
-    from omacap.analysis.audio import load_audio
+    from omacap.analysis.audio import load_audio, trim_silence
     from omacap.analysis.report import analyse_file
 
     intervals = {0: "root", 1: "semitone", 2: "2nd", 3: "minor 3rd",
@@ -217,7 +221,9 @@ def recordings(paths: list[Path]) -> int:
 
     for path in paths:
         analysis = analyse_file(path, vocabulary="simple")
-        buffer = load_audio(path)
+        # The analysis trims leading silence, and bar times are measured
+        # from the trimmed audio, so the same trim has to happen here.
+        buffer = trim_silence(load_audio(path))
         pitch, rate = track(np.asarray(buffer.samples), buffer.sample_rate)
         counts: dict[int, int] = {}
         freqs = []

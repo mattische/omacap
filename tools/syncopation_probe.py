@@ -18,21 +18,35 @@ says, with no tuning:
 Note that straight eighths score zero, correctly: every off-beat there is
 followed by a stronger position that *is* played, so nothing is displaced.
 
-WHAT DOES NOT WORK YET: the bar-level onset profile the score needs.
+A CORRECTION. An earlier version of this file reported that the bar profile was
+unusable - that on MEDS it peaked 1.75 beats into the bar. That was a bug here,
+not a property of the audio: the analysis trims leading silence and measures bar
+times from the trimmed audio, while this computed onsets on the untrimmed file.
+On MEDS that is 3.4 seconds, nearly two bars. With the trim applied the profiles
+are what the music actually does:
 
-  - On MEDS the averaged profile peaks 1.75 beats into the bar, not on the
-    downbeat, and reads as "every odd sixteenth, never the downbeat". The chord
-    grid is not the problem - it agrees with the band's own chart 94% and finds
-    their chorus exactly - so the fault is in this profile, not in the bars.
-  - On two of five recordings every one of the sixteen positions clears the
-    floor, because dense material makes the normalised profile flat. Nothing can
-    then be called syncopated, whatever the music does.
+    MEDS                4/4   0.00   #.#.#.#.#.#.#.#.   straight eighths
+    The Last Song       4/4   0.00   #...#...#...#...   four quarter notes
+    So Gung Ho          4/4   0.00   #.#.#.#.#.#.#...
 
-So a syncopation figure computed this way would be an artefact of the profile,
-not a property of the song, and omacap does not report one. What it would take:
-onset strength separated by band so a backbeat snare cannot outweigh the kick on
-beat one, a downbeat placed from accent rather than inherited from the bar grid,
-and a per-position significance test instead of one fixed floor.
+The downbeat lands on position 0 on every one, and the scores are 0.00 because
+these songs are straight - which is the right answer, not a failure.
+
+WHAT STILL DOES NOT WORK, for two reasons that survive the fix:
+
+  - Averaged over a whole song, syncopation washes out. A syncopated chorus and
+    a straight verse average to straight. Anything useful would have to be
+    measured per section, which omacap now knows how to divide.
+  - On dense material every one of the sixteen positions clears the floor, so
+    nothing can be called syncopated whatever the music does. Separating the
+    onset into kick, snare and hat bands was tried against exactly this and does
+    not help - all three bands stay full. The floor is the problem, not the
+    mixing of bands.
+
+Band separation does earn one thing: the kick band alone (40-120 Hz) puts the
+peak on the downbeat on every recording tried, where the full band peaks on the
+backbeat instead. That is the band omacap's metre detection already uses, so the
+measurement confirms that choice rather than improving on it.
 
     python tools/syncopation_probe.py                 # the synthesised patterns
     python tools/syncopation_probe.py FILE [FILE...]  # real recordings
@@ -142,14 +156,16 @@ def synthesised() -> int:
 def recordings(paths: list[Path]) -> int:
     import numpy as np
 
-    from omacap.analysis.audio import load_audio
+    from omacap.analysis.audio import load_audio, trim_silence
     from omacap.analysis.features import HOP_LENGTH, onset_strengths
     from omacap.analysis.report import analyse_file
 
     print(f"{'song':33}{'metre':6}{'score':>6}   profile (sixteenths)")
     for path in paths:
         analysis = analyse_file(path, vocabulary="simple")
-        buffer = load_audio(path)
+        # The analysis trims leading silence, and bar times are measured
+        # from the trimmed audio, so the same trim has to happen here.
+        buffer = trim_silence(load_audio(path))
         onset, _ = onset_strengths(np.asarray(buffer.samples), buffer.sample_rate)
         bar_length = float(np.median([bar.duration for bar in analysis.bars]))
         profile = bar_profile(onset, buffer.sample_rate / HOP_LENGTH,
