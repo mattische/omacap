@@ -201,6 +201,16 @@ def chord_evidence(spans, tonic: int, mode: str) -> float:
     return score
 
 
+def are_relatives(first: tuple[int, str], second: tuple[int, str]) -> bool:
+    """Are these two keys a relative pair - the same notes, a different home?"""
+    (first_tonic, first_mode), (second_tonic, second_mode) = first, second
+    if first_mode == second_mode:
+        return False
+    major, minor = ((first_tonic, second_tonic) if first_mode == "major"
+                    else (second_tonic, first_tonic))
+    return (major + 9) % 12 == minor
+
+
 def detect_key_with_chords(chroma, spans) -> Key:
     """Detect the key using both the chromagram and the recognised chords.
 
@@ -232,7 +242,22 @@ def detect_key_with_chords(chroma, spans) -> Key:
         )
     combined.sort(key=lambda item: item[0], reverse=True)
     best_score, tonic, mode, correlation = combined[0]
-    margin = max(0.0, best_score - combined[1][0])
+    runner_up = combined[1]
+
+    # A key and its relative contain identical notes, so the chroma correlation
+    # cannot tell them apart - whatever number it produces for one of them, it
+    # produces for the other by construction. Letting it vote on that decision
+    # is not a weighting choice, it is asking a blind witness. When the top two
+    # are a relative pair, the chords decide alone.
+    if are_relatives((tonic, mode), (runner_up[1], runner_up[2])):
+        mine = chord_evidence(spans, tonic, mode)
+        theirs = chord_evidence(spans, runner_up[1], runner_up[2])
+        if theirs > mine:
+            best_score, tonic, mode, correlation = runner_up
+            mine, theirs = theirs, mine
+        margin = abs(mine - theirs) * CHORD_EVIDENCE_WEIGHT
+    else:
+        margin = max(0.0, best_score - runner_up[0])
     return Key(
         tonic=tonic,
         mode=mode,

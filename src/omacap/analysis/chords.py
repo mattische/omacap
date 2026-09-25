@@ -41,7 +41,7 @@ VOCABULARIES: dict[str, tuple[str, ...]] = {
     "standard": ("", "m", "7", "m7"),
     "full": tuple(suffix for suffix, _ in QUALITIES),
 }
-DEFAULT_VOCABULARY = "standard"
+DEFAULT_VOCABULARY = "simple"
 
 
 def get_vocabulary(name: str) -> tuple[str, ...]:

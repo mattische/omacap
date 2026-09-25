@@ -196,3 +196,70 @@ def test_the_relative_of_the_relative_is_the_original():
     for tonic in range(12):
         key = Key(tonic, "major", 0.9, 0.5)
         assert key.relative.relative.name == key.name
+
+
+# -- relative keys --------------------------------------------------------
+
+def test_a_key_and_its_relative_are_a_pair():
+    from omacap.analysis.key import are_relatives
+
+    assert are_relatives((0, "major"), (9, "minor"))      # C major / A minor
+    assert are_relatives((9, "minor"), (0, "major"))      # and the other way
+    assert are_relatives((7, "major"), (4, "minor"))      # G major / E minor
+
+
+def test_keys_that_are_not_a_relative_pair():
+    from omacap.analysis.key import are_relatives
+
+    assert not are_relatives((0, "major"), (7, "major"))  # same mode
+    assert not are_relatives((0, "minor"), (9, "minor"))
+    assert not are_relatives((0, "major"), (0, "minor"))  # parallel, not relative
+    assert not are_relatives((0, "major"), (2, "minor"))
+
+
+def test_the_chords_decide_between_relatives(monkeypatch):
+    """The chroma cannot tell C major from A minor, so it must not get a vote.
+
+    Both keys hold the same notes, so whatever correlation the chroma gives one
+    it gives the other. Here the chroma is made to prefer C major while the
+    chords behave like A minor; A minor has to win.
+    """
+    import numpy as np
+
+    from omacap.analysis import key as key_module
+    from omacap.analysis.chords import ChordSpan
+
+    # An A minor progression: Am - Dm - E - Am, ending at home.
+    spans = [
+        ChordSpan("Am", 0.0, 2.0, 9, "m", 0.9),
+        ChordSpan("Dm", 2.0, 4.0, 2, "m", 0.9),
+        ChordSpan("E", 4.0, 6.0, 4, "", 0.9),
+        ChordSpan("Am", 6.0, 8.0, 9, "m", 0.9),
+    ]
+    # A chroma holding the white notes, weighted towards C.
+    chroma = np.zeros(12)
+    for pitch, level in {0: 5.0, 2: 3.0, 4: 4.0, 5: 3.0, 7: 4.0, 9: 3.5, 11: 2.5}.items():
+        chroma[pitch] = level
+
+    detected = key_module.detect_key_with_chords(chroma.reshape(12, 1), spans)
+    assert detected.name == "A minor", detected.name
+
+
+def test_a_non_relative_runner_up_still_uses_the_combined_score():
+    """The rule fires only where the chroma is blind, not everywhere."""
+    import numpy as np
+
+    from omacap.analysis import key as key_module
+    from omacap.analysis.chords import ChordSpan
+
+    spans = [
+        ChordSpan("C", 0.0, 2.0, 0, "", 0.9),
+        ChordSpan("F", 2.0, 4.0, 5, "", 0.9),
+        ChordSpan("G", 4.0, 6.0, 7, "", 0.9),
+        ChordSpan("C", 6.0, 8.0, 0, "", 0.9),
+    ]
+    chroma = np.zeros(12)
+    for pitch, level in {0: 6.0, 2: 2.5, 4: 4.0, 5: 4.0, 7: 5.0, 9: 3.0, 11: 2.5}.items():
+        chroma[pitch] = level
+    detected = key_module.detect_key_with_chords(chroma.reshape(12, 1), spans)
+    assert detected.name == "C major", detected.name

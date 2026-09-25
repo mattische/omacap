@@ -24,9 +24,10 @@ from synth import SR, song
 FOUR = [(0, ""), (7, ""), (9, "m"), (5, "")]
 
 
-def analyse(progression=FOUR, **kwargs):
+def analyse(progression=FOUR, vocabulary=None, **kwargs):
     audio = song(progression, **kwargs)
-    return analyse_buffer(AudioBuffer(audio, SR), Path("Test Song.wav"))
+    return analyse_buffer(AudioBuffer(audio, SR), Path("Test Song.wav"),
+                          **({"vocabulary": vocabulary} if vocabulary else {}))
 
 
 @pytest.fixture(scope="module")
@@ -82,15 +83,20 @@ def test_the_vocabulary_lists_what_the_chart_shows(analysis):
 
 
 @pytest.mark.parametrize(
-    "progression,beats_per_bar,bpm,bars,expected",
+    "progression,beats_per_bar,bpm,bars,expected,vocabulary",
     [
-        ([(9, "m"), (5, ""), (0, ""), (7, "")], 4, 100, 12, ["Am", "F", "C", "G"]),
-        ([(0, ""), (5, ""), (7, "")], 3, 140, 12, ["C", "F", "G"]),
-        ([(2, "m7"), (7, "7"), (0, ""), (0, "")], 4, 90, 16, ["Dm7", "G7", "C", "C"]),
+        ([(9, "m"), (5, ""), (0, ""), (7, "")], 4, 100, 12,
+         ["Am", "F", "C", "G"], None),
+        ([(0, ""), (5, ""), (7, "")], 3, 140, 12, ["C", "F", "G"], None),
+        # Sevenths are not in the default vocabulary, which writes the plain
+        # triad on purpose, so this asks for the one that has them.
+        ([(2, "m7"), (7, "7"), (0, ""), (0, "")], 4, 90, 16,
+         ["Dm7", "G7", "C", "C"], "standard"),
     ],
 )
-def test_other_songs(progression, beats_per_bar, bpm, bars, expected):
-    result = analyse(progression, beats_per_bar=beats_per_bar, bpm=bpm, bars=bars)
+def test_other_songs(progression, beats_per_bar, bpm, bars, expected, vocabulary):
+    result = analyse(progression, beats_per_bar=beats_per_bar, bpm=bpm, bars=bars,
+                     vocabulary=vocabulary)
     assert result.tempo == pytest.approx(bpm, rel=0.03)
     assert result.bar_count == bars
     assert [bar.label for bar in result.bars[: len(expected)]] == expected

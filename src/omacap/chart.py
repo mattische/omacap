@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .analysis.chords import NO_CHORD
 from .chordgrid import bar_source
 
 #: Bars per line. Four is how lead sheets are normally laid out.
@@ -216,6 +217,16 @@ def _sections_note(analysis, bars_per_line: int, collapse: bool,
             "which one is the verse.", ""]
 
 
+def _played_chords(analysis) -> list[str]:
+    """The chords the song uses, which does not include not having one.
+
+    `N.C.` is a finding, not a chord somebody plays, and in a chordgrid it is
+    written as a rest and never appears at all. Listing it as a chord the song
+    uses is wrong in the format where it cannot be seen.
+    """
+    return [label for label in analysis.chord_vocabulary if label != NO_CHORD]
+
+
 def _uncertain_note(analysis, grid: bool) -> list[str]:
     """How the bars worth a second listen are pointed out.
 
@@ -367,7 +378,7 @@ def summary_rows(analysis) -> list[tuple[str, str]]:
         ("Time signature", meter_text),
         ("Bars", str(analysis.bar_count)),
         ("Length", format_clock(analysis.duration)),
-        ("Chords used", ", ".join(analysis.chord_vocabulary) or "none"),
+        ("Chords used", ", ".join(_played_chords(analysis)) or "none"),
         (
             "Confidence",
             f"key {confidence_word(key.confidence)}, "
@@ -396,8 +407,11 @@ def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
     for label, value in rows:
         lines.append(f"| **{label}** | {value} |")
     lines += ["", "## Chart", ""]
-    lines.append(f"Bars read left to right, {bars_per_line} per line.")
-    lines += _form_note(analysis, _layout(analysis, bars_per_line, collapse))
+    rows = _layout(analysis, bars_per_line, collapse)
+    sectioned = grid and sections and len(_group_rows(rows, bars_per_line)) > 1
+    if not sectioned:
+        lines.append(f"Bars read left to right, {bars_per_line} per line.")
+    lines += _form_note(analysis, rows)
     lines += _uncertain_note(analysis, grid)
     lines.append("")
     if grid:

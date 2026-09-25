@@ -384,3 +384,35 @@ def test_the_form_is_named_above_the_chart(analysis):
 
 def test_no_collapse_leaves_the_form_out(analysis):
     assert "Form:" not in render(analysis, "md", collapse=False)
+
+
+def test_no_chord_is_not_listed_as_a_chord_the_song_uses():
+    from omacap.chart import _played_chords
+
+    class Stub:
+        chord_vocabulary = ["C", "N.C.", "Am"]
+
+    assert _played_chords(Stub()) == ["C", "Am"]
+
+
+@pytest.fixture(scope="module")
+def two_part_song():
+    """A song with two different repeated phrases, so it has two sections."""
+    import numpy as np
+
+    first = song([(0, ""), (7, ""), (9, "m"), (5, "")], bars=8)
+    second = song([(4, "m"), (0, ""), (2, ""), (2, "")], bars=8)
+    joined = np.concatenate([first, second, first, second])
+    return analyse_buffer(AudioBuffer(joined, SR), Path("Two Parts.wav"))
+
+
+def test_bars_per_line_is_not_claimed_once_each_section_has_its_own_grid(
+        two_part_song, analysis):
+    from omacap.chart import _group_rows, _layout
+
+    sections = len(_group_rows(_layout(two_part_song, 4, True), 4))
+    assert sections > 1, "expected the fixture to have several sections"
+    assert "per line" not in render(two_part_song, "chordgrid")
+    # A chart that is not split into sections still says how it is laid out.
+    assert "per line" in render(two_part_song, "md")
+    assert "per line" in render(two_part_song, "chordgrid", sections=False)
