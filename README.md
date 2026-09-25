@@ -57,6 +57,32 @@ sudo dnf install ffmpeg pulseaudio-utils python3
 macOS and Windows are not supported: both lack the PulseAudio monitor source
 that omacap records from.
 
+### On Omarchy
+
+Nothing to install. `ffmpeg` comes in as a dependency of `omacut` and `mpv`, and
+`pactl` comes in with `pipewire-pulse` via `libpulse`, so a stock Omarchy machine
+already has everything. Run `omacap doctor` to confirm.
+
+### Moving between machines
+
+omacap looks its environment up at runtime rather than assuming anything: the
+audio server socket (falling back to `/run/user/$UID` when `XDG_RUNTIME_DIR` is
+unset), the current default sink and its monitor, the output folder, and which
+encoders and filters the local ffmpeg actually supports.
+
+A slimmer ffmpeg build is the one thing that changes behaviour, and it degrades
+rather than breaking:
+
+- a **missing encoder** (no `libmp3lame`, no `libopus`) makes that one format
+  unavailable. `omacap formats` marks it, `omacap doctor` lists it, and trying to
+  use it fails immediately with the encoder's name rather than an ffmpeg error.
+  The TUI's `f` key skips it.
+- an **ffmpeg too old for the meter filter** costs you the live level meter and
+  nothing else. Recording carries on as normal and `doctor` says so.
+
+If a check ever cannot be answered, omacap assumes the feature works rather than
+refusing to record.
+
 ## Install
 
 ```bash
