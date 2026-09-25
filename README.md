@@ -31,91 +31,11 @@ write that out as a chord chart.
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Requirements
-
-| What | Why | Notes |
-| --- | --- | --- |
-| Linux with PipeWire or PulseAudio | provides the monitor source that carries playback audio | PipeWire's PulseAudio layer works as-is |
-| `ffmpeg` | captures and encodes the audio | must be on your `PATH` |
-| `pactl` | lists the available sources | ships with `libpulse` / `pulseaudio-utils` |
-| Python 3.10+ | runs omacap | recording needs no third-party packages |
-| numpy *(optional)* | chord, key and tempo detection | only for `omacap analyze`; `pip install 'omacap[analyze]'` |
-
-Install the system packages:
-
-```bash
-# Arch / Omarchy
-sudo pacman -S ffmpeg libpulse python
-
-# Debian / Ubuntu
-sudo apt install ffmpeg pulseaudio-utils python3 python3-venv
-
-# Fedora
-sudo dnf install ffmpeg pulseaudio-utils python3
-```
-
-macOS and Windows are not supported: both lack the PulseAudio monitor source
-that omacap records from.
-
-### On Omarchy
-
-Nothing to install. `ffmpeg` comes in as a dependency of `omacut` and `mpv`, and
-`pactl` comes in with `pipewire-pulse` via `libpulse`, so a stock Omarchy machine
-already has everything. Run `omacap doctor` to confirm.
-
-### Already installed it once?
-
-`omacap doctor` says which copy your shell would actually run, and warns if a
-second one is shadowing it:
-
-```
-[ok] install   managed at /home/you/.local/share/omacap/src (eb1431a)
-[ok] command   /home/you/.local/bin/omacap
-```
-
-If you installed earlier by cloning by hand, that clone already updates itself
-with `omacap update` — there is nothing to redo. Reinstall with the script only
-if you want the managed layout and the `~/.local/bin/omacap` command; then remove
-the old copy so two do not compete:
-
-```bash
-rm -rf /path/to/the/old/clone          # or just its .venv
-hash -r                                # let the shell forget the old path
-omacap doctor
-```
-
-### Recording over SSH
-
-omacap records the sound card of the machine it runs on. Over SSH that is the
-**remote** machine, not the one you are sitting at — so it captures what is
-playing over there. `omacap devices` names the host's outputs if you need to
-check which machine you are pointed at.
-
-It does work over SSH: when `XDG_RUNTIME_DIR` is unset, as it often is in a
-non-graphical session, omacap falls back to `/run/user/$UID` to reach the audio
-server.
-
-### Moving between machines
-
-omacap looks its environment up at runtime rather than assuming anything: the
-audio server socket (falling back to `/run/user/$UID` when `XDG_RUNTIME_DIR` is
-unset), the current default sink and its monitor, the output folder, and which
-encoders and filters the local ffmpeg actually supports.
-
-A slimmer ffmpeg build is the one thing that changes behaviour, and it degrades
-rather than breaking:
-
-- a **missing encoder** (no `libmp3lame`, no `libopus`) makes that one format
-  unavailable. `omacap formats` marks it, `omacap doctor` lists it, and trying to
-  use it fails immediately with the encoder's name rather than an ffmpeg error.
-  The TUI's `f` key skips it.
-- an **ffmpeg too old for the meter filter** costs you the live level meter and
-  nothing else. Recording carries on as normal and `doctor` says so.
-
-If a check ever cannot be answered, omacap assumes the feature works rather than
-refusing to record.
-
 ## Install
+
+Linux with PipeWire or PulseAudio, plus `ffmpeg` and `pactl`. The installer
+checks for them and tells you what is missing; see
+[Requirements](#requirements) for the details.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mattische/omacap/main/install.sh | bash
@@ -188,6 +108,79 @@ omacap 0.1.0
 
 Everything looks good.
 ```
+
+### Already installed it once?
+
+`omacap doctor` says which copy your shell would actually run, and warns if a
+second one is shadowing it:
+
+```
+[ok] install   managed at /home/you/.local/share/omacap/src (eb1431a)
+[ok] command   /home/you/.local/bin/omacap
+```
+
+If you installed earlier by cloning by hand, that clone already updates itself
+with `omacap update` — there is nothing to redo. Reinstall with the script only
+if you want the managed layout and the `~/.local/bin/omacap` command; then remove
+the old copy so two do not compete:
+
+```bash
+rm -rf /path/to/the/old/clone          # or just its .venv
+hash -r                                # let the shell forget the old path
+omacap doctor
+```
+
+## Requirements
+
+| What | Why | Notes |
+| --- | --- | --- |
+| Linux with PipeWire or PulseAudio | provides the monitor source that carries playback audio | PipeWire's PulseAudio layer works as-is |
+| `ffmpeg` | captures and encodes the audio | must be on your `PATH` |
+| `pactl` | lists the available sources | ships with `libpulse` / `pulseaudio-utils` |
+| Python 3.10+ | runs omacap | recording needs no third-party packages |
+| numpy *(optional)* | chord, key and tempo detection | only for `omacap analyze`; `pip install 'omacap[analyze]'` |
+
+Install the system packages:
+
+```bash
+# Arch / Omarchy
+sudo pacman -S ffmpeg libpulse python
+
+# Debian / Ubuntu
+sudo apt install ffmpeg pulseaudio-utils python3 python3-venv
+
+# Fedora
+sudo dnf install ffmpeg pulseaudio-utils python3
+```
+
+macOS and Windows are not supported: both lack the PulseAudio monitor source
+that omacap records from.
+
+### On Omarchy
+
+Nothing to install. `ffmpeg` comes in as a dependency of `omacut` and `mpv`, and
+`pactl` comes in with `pipewire-pulse` via `libpulse`, so a stock Omarchy machine
+already has everything. Run `omacap doctor` to confirm.
+
+### Moving between machines
+
+omacap looks its environment up at runtime rather than assuming anything: the
+audio server socket (falling back to `/run/user/$UID` when `XDG_RUNTIME_DIR` is
+unset), the current default sink and its monitor, the output folder, and which
+encoders and filters the local ffmpeg actually supports.
+
+A slimmer ffmpeg build is the one thing that changes behaviour, and it degrades
+rather than breaking:
+
+- a **missing encoder** (no `libmp3lame`, no `libopus`) makes that one format
+  unavailable. `omacap formats` marks it, `omacap doctor` lists it, and trying to
+  use it fails immediately with the encoder's name rather than an ffmpeg error.
+  The TUI's `f` key skips it.
+- an **ffmpeg too old for the meter filter** costs you the live level meter and
+  nothing else. Recording carries on as normal and `doctor` says so.
+
+If a check ever cannot be answered, omacap assumes the feature works rather than
+refusing to record.
 
 ## Usage
 
