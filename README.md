@@ -513,6 +513,17 @@ Treat it as a good first draft of a chart, not a transcription. It is accurate o
 material with a steady pulse and clear harmony, and vaguer on free time, solo
 melody, speech or heavy distortion.
 
+**How accurate, measured.** On synthesised material with known ground truth: tempo
+exact on 12 of 12 click tracks from 60 to 200 BPM, time signature right on 11 of
+12, chords 93% per bar. Against three real band recordings whose players wrote
+their own chord charts: **90% of bars on average carry a chord the chart uses**
+(82–95% across the three), the time signature was right for all three, and the key
+for two — the third is called as the relative major, which shares every chord, and
+is reported as medium confidence rather than as certain.
+
+`tools/score_against_charts.py` does that scoring against your own material, if you
+have charts to compare with.
+
 ### How the analysis works
 
 No machine learning and no scientific stack — just numpy and ffmpeg:

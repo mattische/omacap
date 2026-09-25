@@ -79,8 +79,8 @@ the relevant tests; they encode the ground truth.
 | --- | --- | --- |
 | `analysis/features.py` | `N_FFT_CHROMA = 8192` | 2.7 Hz resolution, enough to separate semitones down to C2. 4096 could not resolve the bass. |
 | `analysis/features.py` | `N_FFT_ONSET = 2048` | Onsets need time resolution, not frequency resolution. Both share `HOP_LENGTH` so the time axes line up. |
-| `analysis/features.py` | `RESOLUTION_KNEE = 2.5` | A semitone needs about this many FFT bins across it before its neighbours separate. At C2 there are only 1.4, so each band is weighted by how well it is resolved rather than the low end being cut off. Measured against a real song with a known chart: the longest correct run went from 16 bars to 24. |
-| `analysis/key.py` | `KEY_BONUS = 0.05` | A second decoding pass favours chords that belong to the detected key. 0.04-0.08 all gave the same gain, so the middle was taken. Raised agreement with a real chart from 91% to 94%. |
+| `analysis/features.py` | `RESOLUTION_KNEE = 2.5` | A semitone needs about this many FFT bins across it before its neighbours separate. At C2 there are only 1.4, so each band is weighted by how well it is resolved rather than the low end being cut off. A hard cutoff at C3 was tried too and was worse; the taper is also stable for a knee anywhere from 2 to 3. |
+| `analysis/key.py` | `KEY_BONUS = 0.05` | A second decoding pass favours chords that belong to the detected key. 0.04-0.08 all gave the same gain, so the middle was taken. |
 | `analysis/features.py` | `sigma_semitones = 0.3` | 0.6 leaked into neighbouring pitch classes badly (a lone A4 scored A, G#, A# nearly equally). 0.2 is too narrow for real, slightly detuned instruments. |
 | `analysis/features.py` | *no log compression on chroma* | Log compression flattened contrast so far that a C major triad ranked G, G#, C. Measured: contrast 3.2 without it, 1.1 with it. |
 | `analysis/chords.py` | correlation, not cosine | Mean-subtracting makes the *absence* of a pitch count as evidence. With plain cosine every triad loses to the seventh chord containing it. |
@@ -156,12 +156,30 @@ From the test suite, against synthesised material with known ground truth:
 - Key: 8/8 on resolving progressions; 5/6 on deliberately ambiguous loops, versus
   2/6 for chroma alone without the chord evidence.
 
-On the private reference track used during development (a 4:30 band mix, for
-which the band's own chord chart exists) it agrees with that chart on **94% of
-bars**, reproduces the verse loop for **24 unbroken bars**, and gets the tempo and
-time signature right. It calls the key G major where the band calls it E minor -
-the relative major, with the same diatonic chords, and it reports that as only
-medium confidence rather than claiming certainty.
+### Against real charts
+
+The development machine has three band recordings for which the band wrote their
+own chord charts, which makes a small but real ground truth. `tools/score_against_charts.py`
+scores against them; the charts are private, so the tool takes a JSON file
+pointing at them rather than carrying any of it in the repo.
+
+Measured there, before and after the resolution taper and the key-informed second
+pass, as the share of bars carrying a chord that appears in the band's chart:
+
+| song | before | after |
+| --- | --- | --- |
+| a 4:33 mix in E minor | 91% | **94%** |
+| a 3:44 mix in G major | 90% | **95%** |
+| a 4:44 mix in D major | 72% | **82%** |
+
+Time signature was right for all three, and the tempo plausible. The key was right
+for two; the third is called G major where the band calls it E minor - the relative
+major, with identical diatonic chords - and it reports that as medium confidence
+rather than claiming certainty.
+
+The weakest of the three is nearly one chord throughout, and most of its
+disagreement is in an intro the chart marks as rests. That is worth knowing before
+chasing the number: a low score is not always a wrong chord.
 A separate live recording of the same track through the sound card agrees — a
 useful end-to-end check that the recording path and the analysis path are
 consistent. Keep a real piece of music around for this: the synthetic tests catch
