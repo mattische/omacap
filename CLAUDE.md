@@ -198,19 +198,29 @@ own chord charts, which makes a small but real ground truth. `tools/score_agains
 scores against them; the charts are private, so the tool takes a JSON file
 pointing at them rather than carrying any of it in the repo.
 
-Measured there, before and after the resolution taper and the key-informed second
-pass, as the share of bars carrying a chord that appears in the band's chart:
+Where it stands, as the share of bars carrying a chord the chart uses:
 
-| song | before | after |
+| song | agreement | longest correct loop |
 | --- | --- | --- |
-| a 4:33 mix in E minor | 91% | **94%** |
-| a 3:44 mix in G major | 90% | **95%** |
-| a 4:44 mix in D major | 72% | **82%** |
+| a 4:33 mix in E minor | 94% | 24 bars |
+| a 3:44 mix in G major | 95% | 8 bars |
+| a 4:44 mix in D major | 86% | 45 bars |
+
+92% on average. What each change bought, measured the same way:
+
+| change | mean agreement |
+| --- | --- |
+| before any of it | 84.3% |
+| resolution taper, key-informed second pass | 90.3% |
+| holding a chord unless the harmony moved | **92.0%** |
 
 Time signature was right for all three, and the tempo plausible. The key was right
 for two; the third is called G major where the band calls it E minor - the relative
-major, with identical diatonic chords - and it reports that as medium confidence
-rather than claiming certainty.
+major, with identical diatonic chords - and it names both rather than claiming one.
+
+Two of the five recordings have no chart, so they are scored only on how settled the
+output is: two-chord bars fell from 62% and 45% to 32% and 29%, and distinct chords
+from 17 and 11 to 15 and 11.
 
 The weakest of the three is nearly one chord throughout, and most of its
 disagreement is in an intro the chart marks as rests. That is worth knowing before
