@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import __version__
-from . import nowplaying, splitter, timeline
+from . import capture, nowplaying, splitter, timeline
 from .analysis import AnalysisUnavailable
 from .analysis.audio import DecodeError
 from .analysis.report import AnalysisError
@@ -64,6 +64,7 @@ examples:
   omacap update                 install the latest version
   omacap nowplaying             show what the media player is playing
   omacap split mix.wav          cut a recording into one file per track
+  omacap record --split         record a playlist, one file per track
 """
 
 
@@ -121,6 +122,16 @@ def build_parser() -> argparse.ArgumentParser:
         "-A", "--analyze", "--analyse", dest="analyze", action="store_true",
         help="analyse the recording as soon as it stops and write a chord chart",
     )
+    record.add_argument(
+        "-S", "--split", action="store_true",
+        help="cut the recording into one file per track when it stops, naming "
+             "each one from the media player",
+    )
+    record.add_argument(
+        "--player", metavar="NAME",
+        help="MPRIS bus name to follow (default: Spotify if running)",
+    )
+    _add_split_options(record)
     _add_analysis_options(record)
 
     analyze = subparsers.add_parser(
@@ -167,19 +178,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-D", "--dir", metavar="PATH",
         help="where to write the pieces (default: beside the recording)",
     )
-    splitting.add_argument(
-        "--min-gap", type=float, default=timeline.DEFAULT_MIN_GAP, metavar="SECONDS",
-        help=f"silence this long counts as a track boundary "
-             f"(default: {timeline.DEFAULT_MIN_GAP})",
-    )
-    splitting.add_argument(
-        "--min-track", type=float, default=timeline.DEFAULT_MIN_TRACK, metavar="SECONDS",
-        help=f"anything shorter is not kept (default: {timeline.DEFAULT_MIN_TRACK:g})",
-    )
-    splitting.add_argument(
-        "--pad", type=float, default=timeline.DEFAULT_PAD, metavar="SECONDS",
-        help=f"keep this much either side of a cut (default: {timeline.DEFAULT_PAD})",
-    )
+    _add_split_options(splitting)
     splitting.add_argument(
         "--threshold", type=float, default=splitter.DEFAULT_THRESHOLD_DB, metavar="DB",
         help=f"level below which audio counts as silence "
@@ -216,6 +215,24 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("formats", help="list output formats")
     subparsers.add_parser("doctor", help="check the installation")
     return parser
+
+
+def _add_split_options(parser: argparse.ArgumentParser) -> None:
+    """Options shared by ``split`` and by ``record --split``."""
+    parser.add_argument(
+        "--min-gap", type=float, default=timeline.DEFAULT_MIN_GAP, metavar="SECONDS",
+        help=f"silence this long counts as a track boundary "
+             f"(default: {timeline.DEFAULT_MIN_GAP})",
+    )
+    parser.add_argument(
+        "--min-track", type=float, default=timeline.DEFAULT_MIN_TRACK,
+        metavar="SECONDS",
+        help=f"anything shorter is not kept (default: {timeline.DEFAULT_MIN_TRACK:g})",
+    )
+    parser.add_argument(
+        "--pad", type=float, default=timeline.DEFAULT_PAD, metavar="SECONDS",
+        help=f"keep this much either side of a cut (default: {timeline.DEFAULT_PAD})",
+    )
 
 
 def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
@@ -325,6 +342,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         output_path = build_output_path(directory, audio_format, args.name)
 
     ensure_format(audio_format)
+    splitting = getattr(args, "split", False)
     recorder = Recorder(
         RecorderConfig(
             source=source,
@@ -333,6 +351,11 @@ def cmd_record(args: argparse.Namespace) -> int:
             bitrate=args.bitrate if audio_format.supports_bitrate else None,
             duration=args.duration,
             meter=False,
+            # Gaps are only worth reporting when something will act on them.
+            detect_silence=splitting,
+            silence_min_gap=min(
+                getattr(args, "min_gap", timeline.DEFAULT_MIN_GAP), 0.3
+            ),
         )
     )
     if not args.quiet:
@@ -343,7 +366,23 @@ def cmd_record(args: argparse.Namespace) -> int:
             print(f"stops   after {args.duration:g}s")
         else:
             print("stops   on Ctrl-C")
-    recorder.start()
+    split_options = capture.SplitOptions(
+        enabled=getattr(args, "split", False),
+        min_gap=getattr(args, "min_gap", timeline.DEFAULT_MIN_GAP),
+        min_track=getattr(args, "min_track", timeline.DEFAULT_MIN_TRACK),
+        pad=getattr(args, "pad", timeline.DEFAULT_PAD),
+        directory=output_path.parent,
+        player=getattr(args, "player", None),
+    )
+    player = capture.choose_player(split_options.player) if split_options.enabled else None
+    if split_options.enabled and not args.quiet:
+        if player:
+            print(f"player  {player}")
+        else:
+            print("player  none found; pieces will be numbered, not named")
+
+    session = capture.TrackSession(recorder, player)
+    session.start()
 
     stop_requested = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop_requested.set())
@@ -351,7 +390,14 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     while recorder.is_running and not stop_requested.wait(0.2):
         pass
-    result = recorder.stop() if recorder.is_running else recorder.wait()
+    silences = recorder.silences
+    if recorder.is_running:
+        result = session.stop()
+    else:
+        if session.watcher is not None:
+            session.watcher.stop()
+        result = recorder.wait()
+    changes = session.changes
 
     if recorder.error:
         print(f"omacap: {recorder.error}", file=sys.stderr)
@@ -364,9 +410,34 @@ def cmd_record(args: argparse.Namespace) -> int:
             f"({format_duration(result.duration)}, {format_size(result.size_bytes)})"
         )
 
+    pieces: list[Path] = []
+    if split_options.enabled:
+        outcome = capture.split_recording(
+            result, silences, changes, split_options, audio_format
+        )
+        if not args.quiet:
+            _report_split(outcome, result)
+        pieces = outcome.written
+        if args.quiet:
+            for path in pieces:
+                print(path)
+
     if getattr(args, "analyze", False):
+        if pieces:
+            return _analyse_many(pieces, args)
         return _analyse_recording(result.path, args, quiet=args.quiet)
     return 0
+
+
+def _report_split(outcome, result) -> None:
+    if not outcome.happened:
+        print(f"split   not split: {outcome.reason}")
+        return
+    source = "the player" if outcome.named else "numbering"
+    print(f"\nsplit into {len(outcome.written)} piece(s), named from {source}:")
+    for path in outcome.written:
+        print(f"  {path.name}")
+    print(f"\n{result.path.name} is untouched.")
 
 
 def _analyse_recording(path: Path, args: argparse.Namespace, quiet: bool = False) -> int:

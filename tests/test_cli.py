@@ -860,3 +860,117 @@ def test_one_failed_chart_does_not_stop_the_others(capsys, split_recording, tmp_
     captured = capsys.readouterr()
     assert "not charted" in captured.err
     assert "120 BPM" in captured.out
+
+
+# -- record --split --------------------------------------------------------
+
+def test_record_split_reports_the_player_it_follows(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.capture import SplitResult
+
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: "org.mpris.MediaPlayer2.spotify")
+    monkeypatch.setattr(cli.capture, "split_recording",
+                        lambda *a, **k: SplitResult(reason="nothing to do"))
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-S"])
+    assert "org.mpris.MediaPlayer2.spotify" in capsys.readouterr().out
+
+
+def test_record_split_says_when_there_is_no_player(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.capture import SplitResult
+
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: None)
+    monkeypatch.setattr(cli.capture, "split_recording",
+                        lambda *a, **k: SplitResult(reason="nothing to do"))
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-S"])
+    out = capsys.readouterr().out
+    assert "numbered, not named" in out
+
+
+def test_record_split_lists_the_pieces(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.capture import SplitResult
+
+    pieces = [tmp_path / "01 - Band - One.wav", tmp_path / "02 - Band - Two.wav"]
+    for piece in pieces:
+        piece.write_bytes(b"\0" * 100)
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: "player")
+    monkeypatch.setattr(cli.capture, "split_recording",
+                        lambda *a, **k: SplitResult(written=pieces, named=True))
+    assert cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-S"]) == 0
+    out = capsys.readouterr().out
+    assert "split into 2 piece(s), named from the player" in out
+    assert "01 - Band - One.wav" in out
+    assert "is untouched" in out
+
+
+def test_quiet_split_prints_only_the_paths(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.capture import SplitResult
+
+    pieces = [tmp_path / "a.wav", tmp_path / "b.wav"]
+    for piece in pieces:
+        piece.write_bytes(b"\0" * 100)
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: None)
+    monkeypatch.setattr(cli.capture, "split_recording",
+                        lambda *a, **k: SplitResult(written=pieces))
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-q", "-S"])
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines[1:] == [str(p) for p in pieces]
+
+
+def test_a_recording_that_would_not_split_says_why(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.capture import SplitResult
+
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: None)
+    monkeypatch.setattr(
+        cli.capture, "split_recording",
+        lambda *a, **k: SplitResult(reason="only one piece was found"),
+    )
+    assert cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-S"]) == 0
+    assert "not split: only one piece was found" in capsys.readouterr().out
+
+
+def test_splitting_turns_on_gap_detection(stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    """Without --split there is nothing to act on a gap, so it is not asked for."""
+    built = []
+    real = cli.Recorder
+
+    class Spy(real):
+        def __init__(self, config):
+            built.append(config)
+            super().__init__(config)
+
+    monkeypatch.setattr(cli, "Recorder", Spy)
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: None)
+    monkeypatch.setattr(cli.capture, "split_recording",
+                        lambda *a, **k: __import__("omacap.capture", fromlist=["x"]).SplitResult())
+
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path)])
+    assert built[-1].detect_silence is False
+
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-S"])
+    assert built[-1].detect_silence is True
+
+
+def test_split_and_analyze_charts_each_piece(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.capture import SplitResult
+
+    pieces = [tmp_path / "one.wav", tmp_path / "two.wav"]
+    for piece in pieces:
+        piece.write_bytes(b"\0" * 100)
+    charted = []
+
+    def fake_analyse(path, **kwargs):
+        charted.append(path)
+        return type("A", (), {
+            "key": type("K", (), {"short_name": "C"})(),
+            "meter": type("M", (), {"name": "4/4"})(),
+            "tempo": 120.0, "bar_count": 8,
+        })()
+
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: None)
+    monkeypatch.setattr(cli.capture, "split_recording",
+                        lambda *a, **k: SplitResult(written=pieces))
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", fake_analyse)
+    monkeypatch.setattr("omacap.cli.write_chart", lambda a, target, *rest: target)
+
+    assert cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path),
+                     "-S", "-A"]) == 0
+    assert charted == pieces          # the pieces, not the whole recording

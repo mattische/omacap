@@ -121,7 +121,7 @@ def _reset_capability_caches() -> None:
     from omacap import recorder
 
     recorder.available_encoders.cache_clear()
-    recorder.metering_supported.cache_clear()
+    recorder.filter_supported.cache_clear()
 
 
 @pytest.fixture(autouse=True)

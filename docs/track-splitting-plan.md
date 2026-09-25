@@ -1,10 +1,9 @@
 # Plan: split a playlist capture into one file per track
 
-Status: **phases 1 and 2 done.** `nowplaying.py`, `timeline.py`, `splitter.py`,
-`omacap nowplaying` and `omacap split` are built, and the offset below has been
-measured against a real Spotify client. Phase 3 (a live timeline during
-recording, so the pieces get their names) and phase 4 are still to do.
-Written 2026-09-25.
+Status: **phases 1-3 done.** `omacap record --split` records a playlist and cuts
+it into named files, verified end to end against a real Spotify client. Phase 4
+- charting each piece is already there via `--analyze`, but the TUI prompt and
+stopping on a long silence are not - is still to do. Written 2026-09-25.
 
 The idea: while recording a streaming playlist, read what the player says is
 playing, and at the end cut the single capture into one file per track, named
@@ -77,8 +76,9 @@ the timeline directly in *file* time. No wall-clock mapping is needed.
 | `nowplaying.py` | find the MPRIS player, poll metadata, normalise it | 120 lines |
 | `timeline.py` | collect events, resolve boundaries — **pure logic, no I/O** | 150 lines |
 | `splitter.py` | cut the file with ffmpeg, validate the segments | 130 lines |
-| `recorder.py` | add `silencedetect` to the chain, parse its events | +40 lines |
-| `cli.py` / `tui.py` | the surface | +150 lines |
+| `recorder.py` | `silencedetect` in the chain, its events parsed, `silences` and `silent_for` exposed | done |
+| `capture.py` | recorder and watcher on one timeline, then the cut | done |
+| `cli.py` | `split`, `nowplaying`, `record --split` | done; the TUI is phase 4 |
 
 `timeline.py` is deliberately I/O-free: every awkward decision lives there, so it
 is entirely table-testable without any audio.
@@ -202,7 +202,7 @@ The project's existing patterns fit this directly.
 | --- | --- | --- |
 | **1** ✅ | `nowplaying.py` + `omacap nowplaying` | Done. The D-Bus-to-audio delay is measured; see below. |
 | **2** ✅ | silence events + `omacap split FILE` | Done. Useful on its own, independent of MPRIS |
-| **3** | live timeline + `record --split` with names | The feature itself |
+| **3** ✅ | live timeline + `record --split` with names | Done. Verified against Spotify: two correctly named files either side of a real track change. |
 | **4** | per-segment analysis, TUI prompt, auto-stop | The convenience |
 
 Phase 1 comes first deliberately: it measures the delay *before* anything is

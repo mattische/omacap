@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .devices import Source, _pactl_env
 from .formats import AudioFormat
+from .timeline import parse_silence_line, silences_from_events
 
 #: ffmpeg returns 255 when it is interrupted, which is exactly how we stop it.
 _CLEAN_EXIT_CODES = frozenset({0, 255})
@@ -48,6 +49,20 @@ METER_FILTER = (
     "astats=metadata=1:reset=8:measure_perchannel=none:measure_overall=Peak_level,"
     "ametadata=mode=print:key=lavfi.astats.Overall.Peak_level"
 )
+
+#: Level below which audio counts as a gap between tracks. See splitter.py for
+#: how this was measured.
+SILENCE_THRESHOLD_DB = -60.0
+#: The shortest gap reported. Deliberately finer than the gap that counts as a
+#: track boundary, so the decision stays with the caller rather than with ffmpeg.
+SILENCE_MIN_GAP = 0.3
+
+
+def silence_filter(
+    threshold_db: float = SILENCE_THRESHOLD_DB, min_gap: float = SILENCE_MIN_GAP
+) -> str:
+    """The filter that reports gaps, on the same log channel as the meter."""
+    return f"silencedetect=noise={threshold_db}dB:d={min_gap}"
 
 
 class RecorderError(RuntimeError):
@@ -87,6 +102,9 @@ class RecorderConfig:
     sample_rate: int = 48000
     channels: int = 2
     meter: bool = True
+    detect_silence: bool = False
+    silence_threshold_db: float = SILENCE_THRESHOLD_DB
+    silence_min_gap: float = SILENCE_MIN_GAP
     duration: float | None = None
     extra_ffmpeg_args: list[str] = field(default_factory=list)
 
@@ -98,15 +116,22 @@ class RecorderConfig:
             "-nostdin",
             "-nostats",
             # Filter metadata is logged at info level, so the meter needs it.
-            "-loglevel", "info" if self.meter else "error",
+            "-loglevel", "info" if (self.meter or self.detect_silence) else "error",
             "-f", "pulse",
             "-i", self.source.name,
         ]
+        chain = []
+        if self.detect_silence:
+            chain.append(
+                silence_filter(self.silence_threshold_db, self.silence_min_gap)
+            )
         if self.meter:
             # The log is flushed line by line, whereas ametadata's own file=-
             # output is block-buffered and would only arrive once recording
             # ended - no good for a live meter.
-            cmd += ["-af", METER_FILTER]
+            chain.append(METER_FILTER)
+        if chain:
+            cmd += ["-af", ",".join(chain)]
         cmd += ["-ac", str(self.channels), "-ar", str(self.sample_rate)]
         cmd += self.audio_format.encoder_args(self.bitrate)
         if self.duration is not None:
@@ -230,20 +255,20 @@ def ensure_format(audio_format: AudioFormat) -> None:
         )
 
 
-@lru_cache(maxsize=1)
-def metering_supported() -> bool:
-    """Whether this ffmpeg understands the level meter's filter chain.
+@lru_cache(maxsize=8)
+def filter_supported(chain: str) -> bool:
+    """Whether this ffmpeg understands a filter chain.
 
-    Older builds reject options such as ``measure_overall``, and an unusable
-    filter makes ffmpeg refuse to start at all - which would lose the recording
-    rather than just the meter. Probing once is cheap insurance.
+    An unusable filter makes ffmpeg refuse to start at all, so a build that does
+    not know one of these would lose the whole recording rather than just the
+    feature. Probing once per chain is cheap insurance.
     """
     try:
         proc = subprocess.run(
             [
                 ensure_ffmpeg(), "-hide_banner", "-loglevel", "error", "-nostdin",
                 "-f", "lavfi", "-i", "anullsrc=r=8000:cl=mono",
-                "-af", METER_FILTER,
+                "-af", chain,
                 "-t", "0.05", "-f", "null", os.devnull,
             ],
             capture_output=True,
@@ -253,6 +278,16 @@ def metering_supported() -> bool:
     except (OSError, subprocess.TimeoutExpired, RecorderError):
         return False
     return proc.returncode == 0
+
+
+def metering_supported() -> bool:
+    """Whether the live level meter can run."""
+    return filter_supported(METER_FILTER)
+
+
+def silence_detection_supported() -> bool:
+    """Whether gaps can be reported while recording."""
+    return filter_supported(silence_filter())
 
 
 def parse_peak_db(line: str) -> float | None:
@@ -289,6 +324,7 @@ class Recorder:
         self._out_time = 0.0
         self._total_size = 0
         self._peak_db = METER_FLOOR_DB
+        self._silence_events: list[tuple[str, float]] = []
         self._stderr_tail: list[str] = []
 
     # -- lifecycle ---------------------------------------------------------
@@ -424,6 +460,11 @@ class Recorder:
                 with self._lock:
                     self._peak_db = peak
                 continue
+            event = parse_silence_line(line)
+            if event is not None:
+                with self._lock:
+                    self._silence_events.append(event)
+                continue
             if _NOISE_RE.search(line):
                 continue
             self._stderr_tail.append(line)
@@ -469,6 +510,26 @@ class Recorder:
     def peak_db(self) -> float:
         with self._lock:
             return self._peak_db
+
+    @property
+    def silences(self):
+        """Gaps seen so far, with an unfinished one closed at the current time.
+
+        A gap still open is the recording trailing off into silence, which is
+        exactly what a caller watching for the end of a playlist wants to see.
+        """
+        with self._lock:
+            events = list(self._silence_events)
+        return silences_from_events(events, self.duration)
+
+    @property
+    def silent_for(self) -> float:
+        """How long the recording has been silent, right now. 0.0 if it is not."""
+        gaps = self.silences
+        if not gaps:
+            return 0.0
+        last = gaps[-1]
+        return last.duration if last.end >= self.duration - 0.05 else 0.0
 
     @property
     def stderr_tail(self) -> list[str]:

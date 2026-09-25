@@ -280,7 +280,39 @@ Set `OMACAP_OUTPUT_DIR` to change the default folder permanently.
 
 ## Splitting a recording into tracks
 
-Record a playlist in one go, then cut it where the music stopped:
+Recording a playlist? `--split` cuts it into one file per track as soon as it
+stops, and takes the names from whatever the media player says it is playing:
+
+```bash
+omacap record --split
+```
+
+```
+source  Monitor of Apple Audio Device Internal Speakers
+format  wav
+player  org.mpris.MediaPlayer2.spotify
+saved   /home/you/Recordings/omacap/omacap_2026-09-25_15-49-58.wav (1:10, 12.8 MB)
+
+split into 2 piece(s), named from the player:
+  01 - trampe_strandberg - Det är din stund på jorden.wav
+  02 - trampe_strandberg - Mitt liv, min tid (Albert Carlsons memoarer).wav
+
+omacap_2026-09-25_15-49-58.wav is untouched.
+```
+
+It reads the player over MPRIS, which every desktop media player publishes, so
+`omacap nowplaying` will tell you whether yours is visible. With no player
+running the pieces are still cut on the silences, just numbered rather than named.
+Add `--analyze` and each piece gets its own chord chart.
+
+**A track change decides whether to cut; a silence decides where.** That matters:
+pausing or seeking inside a track makes silence but does not change the track, so
+neither splits the file. A track change with no silence around it — crossfade,
+gapless — still splits, just without a gap to aim at.
+
+### Splitting a recording you already have
+
+Cut an existing file where the music stopped:
 
 ```bash
 omacap split ~/Recordings/omacap/omacap_2026-09-25_08-52-01.wav
