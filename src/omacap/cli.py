@@ -160,10 +160,14 @@ def build_parser() -> argparse.ArgumentParser:
             "tempo, bar count and the chords in each bar."
         ),
     )
-    analyze.add_argument("file", help="audio file to analyse")
+    analyze.add_argument(
+        "files", nargs="+", metavar="FILE",
+        help="audio files to analyse; a directory means every audio file in it",
+    )
     analyze.add_argument(
         "-o", "--output", metavar="FILE",
-        help="chart file to write (default: next to the recording)",
+        help="chart file to write (default: next to each recording); "
+             "only valid for a single input",
     )
     _add_analysis_options(analyze)
     analyze.add_argument(
@@ -527,10 +531,48 @@ def _format_for(path: Path) -> object:
         ) from exc
 
 
-def cmd_analyze(args: argparse.Namespace) -> int:
-    from .analysis.report import analyse_file
+#: Extensions looked for when a directory is given. ffmpeg reads more than this,
+#: but a folder should not be trawled for things that only might be audio.
+AUDIO_SUFFIXES = frozenset(
+    {".wav", ".flac", ".mp3", ".m4a", ".opus", ".ogg", ".aac", ".aif", ".aiff", ".wma"}
+)
 
-    source = Path(args.file).expanduser()
+
+def resolve_inputs(names: list[str]) -> list[Path]:
+    """Expand the arguments into a list of audio files, in a stable order.
+
+    A directory contributes the audio files directly inside it. Charts omacap
+    wrote earlier are not audio, so nothing it produced comes back as input.
+    """
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for name in names:
+        path = Path(name).expanduser()
+        if path.is_dir():
+            entries = sorted(
+                child for child in path.iterdir()
+                if child.is_file() and child.suffix.lower() in AUDIO_SUFFIXES
+            )
+            if not entries:
+                raise ValueError(f"no audio files in {path}")
+        else:
+            entries = [path]
+        for entry in entries:
+            resolved = entry.expanduser()
+            if resolved not in seen:
+                seen.add(resolved)
+                found.append(resolved)
+    return found
+
+
+def cmd_analyze(args: argparse.Namespace) -> int:
+    sources = resolve_inputs(args.files)
+    if args.output and len(sources) > 1:
+        raise ValueError(
+            f"--output names one file but {len(sources)} were given; "
+            f"drop it and each chart is written beside its recording"
+        )
+
     if args.chart_format:
         chart_format = get_chart_format(args.chart_format)
     elif args.output:
@@ -538,19 +580,41 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     else:
         chart_format = "md"
 
-    analysis = analyse_file(source, vocabulary=args.chords)
-    text = render(analysis, chart_format, args.bars_per_line)
+    failures = 0
+    for index, source in enumerate(sources):
+        if len(sources) > 1 and not args.to_stdout:
+            print(f"[{index + 1}/{len(sources)}] {source.name}")
+        try:
+            analysis = _load_analysis(source, args.chords)
+        except (AnalysisError, AnalysisUnavailable, DecodeError) as exc:
+            print(f"omacap: {source.name}: {exc}", file=sys.stderr)
+            failures += 1
+            continue
 
-    if args.to_stdout:
-        print(text)
-        return 0
+        if args.to_stdout:
+            if index:
+                print()
+            print(render(analysis, chart_format, args.bars_per_line))
+            continue
 
-    target = Path(args.output).expanduser() if args.output else default_chart_path(
-        source, chart_format
-    )
-    write_chart(analysis, target, chart_format, args.bars_per_line)
-    _print_analysis_summary(analysis, target)
-    return 0
+        target = (
+            Path(args.output).expanduser() if args.output
+            else default_chart_path(source, chart_format)
+        )
+        write_chart(analysis, target, chart_format, args.bars_per_line)
+        _print_analysis_summary(analysis, target)
+        if len(sources) > 1:
+            print()
+
+    if len(sources) > 1 and not args.to_stdout:
+        print(f"{len(sources) - failures} of {len(sources)} charted.")
+    return 1 if failures and failures == len(sources) else 0
+
+
+def _load_analysis(source: Path, vocabulary: str):
+    from .analysis.report import analyse_file
+
+    return analyse_file(source, vocabulary=vocabulary)
 
 
 def _chart_format_for(path: Path) -> str:

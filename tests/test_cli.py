@@ -1064,3 +1064,122 @@ def test_quiet_mode_still_warns_on_stderr(capsys, stub_audio, fake_ffmpeg, tmp_p
     captured = capsys.readouterr()
     assert "clipped" in captured.err
     assert Path(captured.out.strip()).is_file()      # stdout is still just a path
+
+
+# -- analyze: several inputs -----------------------------------------------
+
+@pytest.fixture
+def two_recordings(tmp_path):
+    import wave
+
+    import numpy as np
+
+    from synth import SR, song
+
+    made = []
+    for name in ("first take.wav", "second take.wav"):
+        audio = song([(0, ""), (7, ""), (9, "m"), (5, "")], bars=8)
+        path = tmp_path / name
+        pcm = (audio / max(float(np.abs(audio).max()), 1e-9) * 30000).astype("<i2")
+        with wave.open(str(path), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(SR)
+            handle.writeframes(pcm.tobytes())
+        made.append(path)
+    return made
+
+
+def test_several_files_are_each_charted(capsys, two_recordings):
+    assert cli.main(["analyze", *[str(p) for p in two_recordings]]) == 0
+    for path in two_recordings:
+        assert path.with_suffix(".md").is_file()
+    out = capsys.readouterr().out
+    assert "[1/2]" in out and "[2/2]" in out
+    assert "2 of 2 charted" in out
+
+
+def test_a_directory_means_every_audio_file_in_it(capsys, two_recordings, tmp_path):
+    (tmp_path / "notes.txt").write_text("not audio")
+    assert cli.main(["analyze", str(tmp_path)]) == 0
+    assert sorted(p.name for p in tmp_path.glob("*.md")) == [
+        "first take.md", "second take.md"
+    ]
+    assert "2 of 2 charted" in capsys.readouterr().out
+
+
+def test_charts_omacap_wrote_are_not_taken_as_input(capsys, two_recordings, tmp_path):
+    """Running it twice over a folder must not try to analyse the charts."""
+    cli.main(["analyze", str(tmp_path)])
+    capsys.readouterr()
+    assert cli.main(["analyze", str(tmp_path)]) == 0
+    assert "2 of 2 charted" in capsys.readouterr().out
+
+
+def test_a_file_named_twice_is_charted_once(capsys, two_recordings):
+    first = str(two_recordings[0])
+    assert cli.main(["analyze", first, first]) == 0
+    out = capsys.readouterr().out
+    # One input left after de-duplicating, so it takes the single-file path.
+    assert out.count("chart   ") == 1
+    assert "[1/" not in out
+
+
+def test_output_is_refused_for_several_inputs(capsys, two_recordings, tmp_path):
+    assert cli.main(["analyze", *[str(p) for p in two_recordings],
+                     "-o", str(tmp_path / "one.md")]) == 1
+    assert "--output names one file" in capsys.readouterr().err
+
+
+def test_output_still_works_for_a_single_input(two_recordings, tmp_path):
+    target = tmp_path / "chart.txt"
+    assert cli.main(["analyze", str(two_recordings[0]), "-o", str(target)]) == 0
+    assert target.is_file()
+
+
+def test_an_empty_directory_says_so(capsys, tmp_path):
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    assert cli.main(["analyze", str(empty)]) == 1
+    assert "no audio files in" in capsys.readouterr().err
+
+
+def test_one_bad_file_does_not_stop_the_others(capsys, two_recordings, tmp_path):
+    broken = tmp_path / "broken.wav"
+    broken.write_bytes(b"not really a wav")
+    assert cli.main(["analyze", str(two_recordings[0]), str(broken),
+                     str(two_recordings[1])]) == 0
+    captured = capsys.readouterr()
+    assert "broken.wav" in captured.err
+    assert "2 of 3 charted" in captured.out
+
+
+def test_all_bad_files_is_a_failure(capsys, tmp_path):
+    broken = tmp_path / "broken.wav"
+    broken.write_bytes(b"not really a wav")
+    assert cli.main(["analyze", str(broken)]) == 1
+
+
+def test_printing_several_charts_separates_them(capsys, two_recordings):
+    assert cli.main(["analyze", *[str(p) for p in two_recordings], "--print"]) == 0
+    out = capsys.readouterr().out
+    assert out.count("## Chart") == 2
+    assert not any(p.with_suffix(".md").exists() for p in two_recordings)
+
+
+def test_inputs_are_resolved_in_order(tmp_path):
+    from omacap.cli import resolve_inputs
+
+    for name in ("b.wav", "a.wav", "c.mp3"):
+        (tmp_path / name).touch()
+    (tmp_path / "notes.md").touch()
+    assert [p.name for p in resolve_inputs([str(tmp_path)])] == ["a.wav", "b.wav", "c.mp3"]
+
+
+def test_a_named_file_need_not_look_like_audio(tmp_path):
+    """Only directory listings are filtered; an explicit name is taken as given."""
+    from omacap.cli import resolve_inputs
+
+    odd = tmp_path / "recording.dat"
+    odd.touch()
+    assert resolve_inputs([str(odd)]) == [odd]

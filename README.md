@@ -431,6 +431,17 @@ Point `omacap analyze` at any recording and it writes a chord chart next to it:
 omacap analyze ~/Recordings/omacap/omacap_2026-09-25_08-52-01.mp3
 ```
 
+It takes as many files as you like, and a directory means every audio file in it:
+
+```bash
+omacap analyze take1.wav take2.wav
+omacap analyze ~/Recordings/omacap          # the whole folder
+omacap analyze ~/Music/session/*.flac -c simple
+```
+
+Each chart is written beside its recording. One file that cannot be analysed does
+not stop the rest; the run only fails if none of them could be.
+
 ```
 key     G major (1 sharp)
 tempo   124 BPM
@@ -472,7 +483,7 @@ In the interactive interface, press **a** after a take to do the same thing, and
 
 | Option | Meaning |
 | --- | --- |
-| `-o, --output` | chart file to write (default: beside the recording) |
+| `-o, --output` | chart file to write; only for a single input (default: beside each recording) |
 | `-t, --chart-format` | `md` or `txt` (default: `md`, or taken from `--output`) |
 | `-c, --chords` | vocabulary: `simple`, `standard` (default) or `full` |
 | `--bars-per-line` | bars per line in the grid (default: 4) |
