@@ -213,7 +213,15 @@ belongs in `tui.py`.
 
 ## If you want to take it further
 
-Nothing here is needed; these are the natural next steps.
+**Splitting a playlist capture into one file per track** is planned in detail in
+[docs/track-splitting-plan.md](docs/track-splitting-plan.md): read what the player
+reports over MPRIS, cut the capture on track changes, name each file after its
+track and chart each one. The plan records what was already measured (silence
+thresholds, `busctl --json` polling cost, the FLAC stream-copy header bug, a
+`sanitize_basename()` bug that mangles ordinary track titles) so none of it has to
+be re-derived, and it phases the work so the one unmeasured risk is settled first.
+
+The rest are smaller and unplanned.
 
 - **Song sections.** Repeated chord patterns are already visible in the charts;
   detecting and labelling them (verse, chorus) would shorten a 139-bar chart a
