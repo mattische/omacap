@@ -128,10 +128,13 @@ From the test suite, against synthesised material with known ground truth:
 - Key: 8/8 on resolving progressions; 5/6 on deliberately ambiguous loops, versus
   2/6 for chroma alone without the chord evidence.
 
-On the reference track (`MEDS sessionmix instr.mp3`, 4:30) it reports G major,
-124 BPM, 4/4, 139 bars, and a clear repeating `D | C | Em | D`. A separate live
-recording of the same track through the sound card agrees — a useful end-to-end
-check that the recording path and the analysis path are consistent.
+On the private reference track used during development (a 4:30 band mix) it
+reports G major, 124 BPM, 4/4, 139 bars, and a clear repeating `D | C | Em | D`.
+A separate live recording of the same track through the sound card agrees — a
+useful end-to-end check that the recording path and the analysis path are
+consistent. Keep a real piece of music around for this: the synthetic tests catch
+correctness, but only real music catches output that is technically right and
+practically unreadable.
 
 ## Working on it
 
