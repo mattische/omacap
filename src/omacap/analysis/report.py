@@ -108,7 +108,10 @@ def analyse_buffer(
     )
     beat_chroma = _beat_chroma(spectral, beat_edges)
 
-    meter = detect_meter(grid.beats, spectral.onset, spectral.frame_rate, beat_chroma)
+    meter = detect_meter(
+        grid.beats, spectral.onset, spectral.frame_rate, beat_chroma,
+        low_onset=spectral.low_onset,
+    )
     key = detect_key_with_chords(spectral.chroma, merge_adjacent(spans))
 
     # Now that the key is known, recognise the chords again with it in mind. Most

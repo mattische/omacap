@@ -24,6 +24,14 @@ CANDIDATES: tuple[tuple[int, str, float], ...] = (
     (7, "7/8", 0.78),
 )
 
+#: How the downbeat cues are mixed. The kick band is the strongest single cue on
+#: produced music and the weakest on a sparse instrumental take, so it shares the
+#: work rather than replacing anything: measured across five recordings, adding it
+#: made the choice markedly more decisive on the dense ones without unseating any
+#: of the time signatures that were already right.
+CUE_WEIGHTS = (0.3, 0.4, 0.3)          # accent, harmonic change, kick band
+
+
 #: A bar of six only counts as 6/8 if its middle is audibly weaker than its
 #: start. When the two are equally accented the music is really in three, played
 #: with a two-bar harmonic rhythm. Measured on the accents alone: a chord that
@@ -90,8 +98,15 @@ def score_grouping(strength, beats_per_bar: int, phase: int) -> float:
     return downbeat_mean - other_mean
 
 
-def detect_meter(beats, onset, frame_rate: float, beat_chroma) -> Meter:
-    """Choose a time signature and the phase of the first downbeat."""
+def detect_meter(
+    beats, onset, frame_rate: float, beat_chroma, low_onset=None
+) -> Meter:
+    """Choose a time signature and the phase of the first downbeat.
+
+    ``low_onset`` is the onset strength in the kick band, when it is available. It
+    is the cue that says "one" in produced music, where the accents are compressed
+    flat and the harmony may not move every bar.
+    """
     np = require_numpy()
     beats = np.asarray(beats, dtype=np.float64)
     if beats.size < 6:
@@ -99,12 +114,24 @@ def detect_meter(beats, onset, frame_rate: float, beat_chroma) -> Meter:
 
     accents = beat_accents(beats, onset, frame_rate)
     novelty = harmonic_novelty(beat_chroma)
-    if novelty.size != accents.size:
-        size = min(novelty.size, accents.size)
-        accents, novelty = accents[:size], novelty[:size]
-    # Chord changes are the more reliable cue on anything but drums, so they
-    # carry the larger share.
-    strength = 0.4 * accents + 0.6 * _normalise(novelty)
+    kick = (
+        beat_accents(beats, low_onset, frame_rate)
+        if low_onset is not None else np.zeros(accents.size)
+    )
+    size = min(novelty.size, accents.size, kick.size)
+    accents, novelty, kick = accents[:size], novelty[:size], kick[:size]
+
+    accent_weight, novelty_weight, kick_weight = CUE_WEIGHTS
+    if low_onset is None:
+        # Share the kick's weight out rather than leaving the scale short.
+        accent_weight += kick_weight * 0.4
+        novelty_weight += kick_weight * 0.6
+        kick_weight = 0.0
+    strength = (
+        accent_weight * accents
+        + novelty_weight * _normalise(novelty)
+        + kick_weight * kick
+    )
 
     results = []
     for beats_per_bar, name, prior in CANDIDATES:

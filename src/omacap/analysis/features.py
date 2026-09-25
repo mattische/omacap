@@ -34,6 +34,11 @@ PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 FLAT_NAMES = ("C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B")
 
 
+#: The band a kick drum lives in. It marks the downbeat in most produced music,
+#: and sits below where the harmony carries, so it is a cue the chroma cannot give.
+LOW_BAND_HZ = (40.0, 120.0)
+
+
 @dataclass
 class Spectral:
     """Frame-wise features sharing one time axis."""
@@ -42,6 +47,7 @@ class Spectral:
     onset: object           # (n_frames,) onset strength
     frame_rate: float       # frames per second
     n_frames: int
+    low_onset: object = None    # (n_frames,) onset strength in the kick band
 
     def frame_times(self):
         np = require_numpy()
@@ -153,16 +159,39 @@ def onset_strength(
     samples, sample_rate: int, n_fft: int = N_FFT_ONSET, hop_length: int = HOP_LENGTH
 ):
     """Spectral flux: how much energy appeared since the previous frame."""
+    return onset_strengths(samples, sample_rate, n_fft, hop_length)[0]
+
+
+def onset_strengths(
+    samples,
+    sample_rate: int,
+    n_fft: int = N_FFT_ONSET,
+    hop_length: int = HOP_LENGTH,
+    band=LOW_BAND_HZ,
+):
+    """Onset strength over the whole spectrum, and over the low band alone.
+
+    Both come out of one transform, because the low band costs nothing extra once
+    the spectrogram exists.
+    """
     np = require_numpy()
     magnitude = stft_magnitude(samples, n_fft, hop_length)
     compressed = np.log1p(500.0 * magnitude)
-    flux = np.diff(compressed, axis=1, prepend=compressed[:, :1])
-    envelope = np.maximum(flux, 0.0).sum(axis=0)
-    # Subtract a local median so a loud section does not dominate a quiet one.
-    envelope = envelope - _moving_median(envelope, window=int(round(sample_rate / hop_length)))
-    envelope = np.maximum(envelope, 0.0)
-    peak = envelope.max()
-    return envelope / peak if peak > 0 else envelope
+    flux = np.maximum(
+        np.diff(compressed, axis=1, prepend=compressed[:, :1]), 0.0
+    )
+    window = int(round(sample_rate / hop_length))
+
+    def finish(rows):
+        envelope = rows.sum(axis=0)
+        # Subtract a local median so a loud section does not dominate a quiet one.
+        envelope = np.maximum(envelope - _moving_median(envelope, window), 0.0)
+        peak = envelope.max()
+        return envelope / peak if peak > 0 else envelope
+
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / sample_rate)
+    low = (freqs >= band[0]) & (freqs <= band[1])
+    return finish(flux), finish(flux[low])
 
 
 def _moving_median(values, window: int):
@@ -177,11 +206,12 @@ def _moving_median(values, window: int):
 def analyse_spectral(samples, sample_rate: int) -> Spectral:
     """Compute every frame-level feature in one pass."""
     chroma = chromagram(samples, sample_rate)
-    onset = onset_strength(samples, sample_rate)
+    onset, low_onset = onset_strengths(samples, sample_rate)
     n_frames = min(chroma.shape[1], onset.shape[0])
     return Spectral(
         chroma=chroma[:, :n_frames],
         onset=onset[:n_frames],
         frame_rate=sample_rate / HOP_LENGTH,
         n_frames=n_frames,
+        low_onset=low_onset[:n_frames],
     )
