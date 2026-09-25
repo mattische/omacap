@@ -607,6 +607,11 @@ minor keys, with the key signature), **tempo** in BPM, the **feel** — whether 
 beat is played straight or swung, and where the off-beat sits — the **number of
 bars**, and the **chords in each bar**.
 
+Not detected: **syncopation**. The scoring works - it reads zero for straight
+eighths and high for a displaced downbeat on material written to test it - but
+the bar-level onset profile it needs is not yet trustworthy on real recordings.
+`tools/syncopation_probe.py` has the numbers.
+
 Where a judgement was a close call, the chart says so on the line itself:
 
 ```
