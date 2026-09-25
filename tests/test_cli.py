@@ -974,3 +974,64 @@ def test_split_and_analyze_charts_each_piece(capsys, stub_audio, fake_ffmpeg, tm
     assert cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path),
                      "-S", "-A"]) == 0
     assert charted == pieces          # the pieces, not the whole recording
+
+
+# -- stopping on silence ---------------------------------------------------
+
+def test_the_watchdog_is_off_unless_asked_for(stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    built = []
+
+    class Spy(cli.Recorder):
+        def __init__(self, config):
+            built.append(config)
+            super().__init__(config)
+
+    monkeypatch.setattr(cli, "Recorder", Spy)
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path)])
+    assert built[-1].detect_silence is False
+
+
+def test_asking_for_the_watchdog_turns_on_gap_detection(stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    built = []
+
+    class Spy(cli.Recorder):
+        def __init__(self, config):
+            built.append(config)
+            super().__init__(config)
+
+    monkeypatch.setattr(cli, "Recorder", Spy)
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path),
+              "--stop-after-silence", "20"])
+    assert built[-1].detect_silence is True
+
+
+def test_splitting_implies_the_watchdog(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    """With --split and no --duration, silence is what ends the recording."""
+    from omacap.capture import SplitResult
+
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: None)
+    monkeypatch.setattr(cli.capture, "split_recording", lambda *a, **k: SplitResult())
+    monkeypatch.setattr(cli.capture, "DEFAULT_STOP_AFTER_SILENCE", 1.0)
+
+    assert cli.main(["record", "-f", "wav", "-D", str(tmp_path), "-S"]) == 0
+    out = capsys.readouterr().out
+    assert "1s of silence" in out
+    assert "stopping" in out
+
+
+def test_the_watchdog_stops_a_recording_that_has_gone_quiet(capsys, stub_audio, fake_ffmpeg, tmp_path):
+    assert cli.main(["record", "-f", "wav", "-D", str(tmp_path),
+                     "--stop-after-silence", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "silence for 1s" in out
+    assert "saved" in out
+
+
+def test_the_watchdog_can_be_switched_off_while_splitting(capsys, stub_audio, fake_ffmpeg, tmp_path, monkeypatch):
+    from omacap.capture import SplitResult
+
+    monkeypatch.setattr(cli.capture, "choose_player", lambda name: None)
+    monkeypatch.setattr(cli.capture, "split_recording", lambda *a, **k: SplitResult())
+    cli.main(["record", "-d", "0.3", "-f", "wav", "-D", str(tmp_path), "-S",
+              "--stop-after-silence", "0"])
+    assert "30s of silence" not in capsys.readouterr().out

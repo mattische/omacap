@@ -74,6 +74,9 @@ class ViewModel:
     show_help: bool = False
     name_prompt: str | None = None
     analyse_prompt: str | None = None
+    split_prompt: str | None = None
+    track_count: int = 0
+    player_label: str = ""
     update_notice: str = ""
 
 
@@ -217,6 +220,12 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
     screen.field("", vm.format_description, DIM)
     screen.field("Folder", vm.output_dir)
     screen.field("Chart", f".{vm.chart_format}")
+    if vm.player_label:
+        playing = vm.player_label
+        if vm.state == "recording" and vm.track_count:
+            playing += f"   ({vm.track_count} track"
+            playing += ")" if vm.track_count == 1 else "s)"
+        screen.field("Playing", playing, CYAN)
     if vm.next_name:
         screen.field("Name", vm.next_name, CYAN)
     screen.row()
@@ -225,6 +234,20 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
         screen.divider("name for next recording")
         screen.row("  " + screen.paint("> ", CYAN) + vm.name_prompt + screen.paint("█", DIM))
         screen.row("  " + screen.paint("enter to accept · esc to cancel", GREY))
+    elif vm.split_prompt is not None:
+        screen.divider("split into separate files?")
+        screen.row("  " + screen.paint(truncate(vm.split_prompt, screen.inner - 3), BOLD))
+        screen.row(
+            "  "
+            + screen.paint(
+                "One file per track, named after each one. The recording is kept.",
+                GREY,
+            )
+        )
+        screen.row(
+            "  " + screen.paint("y", BOLD, GREEN) + screen.paint(" split now", GREY)
+            + screen.paint("    n", BOLD) + screen.paint(" keep as one file", GREY)
+        )
     elif vm.analyse_prompt is not None:
         screen.divider("analyse this recording?")
         screen.row(
@@ -271,6 +294,8 @@ def _footer_lines(vm: ViewModel) -> list[str]:
         return ["typing a name · enter to accept"]
     if vm.analyse_prompt is not None:
         return ["y analyse · n skip · any other key dismisses it"]
+    if vm.split_prompt is not None:
+        return ["y split · n keep as one · any other key dismisses it"]
     action = "stop" if vm.state == "recording" else "record"
     analyse = "a analyse · " if vm.can_analyse else ""
     return [

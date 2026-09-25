@@ -193,10 +193,24 @@ omacap
 Start whatever you want to record, press **space**, press **space** again when
 you are done. The file is written to `~/Recordings/omacap`.
 
-As soon as a take is saved, omacap asks whether to analyse it. Press **y** to get
-a chord chart straight away, **n** to skip, or just carry on — any other key
-dismisses the question and does what you pressed it for. You can always analyse
-later with **a**.
+As soon as a take is saved, omacap asks what to do with it. If the media player
+reported more than one track while you were recording, it offers to split the
+take into one file per track first; then it offers a chord chart — for each piece
+if you split, for the whole recording if you did not. Press **y** to accept, **n**
+to skip, or just carry on: any other key dismisses the question and does what you
+pressed it for. **a** analyses at any time.
+
+The panel shows what the player is playing, and how many tracks have gone by, so
+you can see it working while it records.
+
+To have a long recording stop by itself when the music ends:
+
+```bash
+omacap --stop-after-silence 30
+```
+
+It only arms once something has actually been recorded, so opening omacap before
+pressing play will not stop it straight away.
 
 | Key | Action |
 | --- | --- |

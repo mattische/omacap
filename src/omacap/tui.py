@@ -12,7 +12,7 @@ import time
 import tty
 from pathlib import Path
 
-from . import ui
+from . import capture, ui
 from .analysis import analysis_available
 from .chart import CHART_FORMATS, default_chart_path, write_chart
 from .devices import AudioSystemError, Source, list_monitors, resolve_source
@@ -54,6 +54,8 @@ class TuiApp:
         audio_format: AudioFormat,
         output_dir: Path,
         bitrate: str | None = None,
+        split_options: capture.SplitOptions | None = None,
+        stop_after_silence: float = 0.0,
     ) -> None:
         self.sources: list[Source] = []
         self.source = source
@@ -66,7 +68,15 @@ class TuiApp:
         self.next_name: str | None = None
         self.name_prompt: str | None = None
         self.analyse_prompt: str | None = None
+        self.split_prompt: str | None = None
         self.update_notice: str = ""
+        self.split_options = split_options or capture.SplitOptions()
+        self.stop_after_silence = stop_after_silence
+        self.player: str | None = None
+        self.session: capture.TrackSession | None = None
+        self._stopper = capture.SilenceStopper()
+        self._pending: tuple = ()          # (result, silences, changes)
+        self._pieces: list[Path] = []
         self.recordings: list[str] = []
         self.message = "Press space to start recording."
         self.message_kind = "info"
@@ -99,6 +109,9 @@ class TuiApp:
             meter_db=self.meter_db,
             next_name=self.next_name,
             analyse_prompt=self.analyse_prompt,
+            split_prompt=self.split_prompt,
+            track_count=self.session.track_count if self.session else 0,
+            player_label=self._player_label(),
             update_notice=self.update_notice,
             chart_format=self.chart_format,
             can_analyse=self.last_recording is not None,
@@ -110,6 +123,17 @@ class TuiApp:
         )
 
     # -- actions -----------------------------------------------------------
+
+    def _player_label(self) -> str:
+        """What the followed player is playing, for the panel."""
+        if not self.player:
+            return ""
+        from . import nowplaying
+
+        if self.session is not None and self.session.changes:
+            return self.session.changes[-1].track.label
+        track = nowplaying.current_track(self.player)
+        return track.label if track else ""
 
     def refresh_update_notice(self) -> None:
         """Look up whether a newer omacap is waiting. Never raises, never blocks."""
@@ -132,19 +156,29 @@ class TuiApp:
 
     def start_recording(self) -> None:
         self.analyse_prompt = None
+        self.split_prompt = None
+        self._pieces = []
+        # Look again now rather than trusting what was running at startup: people
+        # open omacap first and start the music afterwards.
+        if self.player is None:
+            self.player = capture.choose_player(self.split_options.player)
         path = build_output_path(self.output_dir, self.audio_format, self.next_name)
         config = RecorderConfig(
             source=self.source,
             audio_format=self.audio_format,
             output_path=path,
             bitrate=self.bitrate if self.audio_format.supports_bitrate else None,
+            detect_silence=True,
         )
         recorder = Recorder(config)
+        session = capture.TrackSession(recorder, self.player)
         try:
-            recorder.start()
+            session.start()
         except RecorderError as exc:
             self.notify(str(exc), "error")
             return
+        self.session = session
+        self._stopper = capture.SilenceStopper(self.stop_after_silence)
         self.recorder = recorder
         self.meter_db = METER_FLOOR_DB
         self.notify(f"Recording to {path.name}", "info")
@@ -155,7 +189,12 @@ class TuiApp:
             return
         self.notify("Finishing file…")
         self.draw(force=True)
-        result = recorder.stop()
+        # Read the gaps before stopping: the recorder closes an unfinished one at
+        # whatever the duration is when asked.
+        silences = recorder.silences
+        changes = self.session.changes if self.session is not None else []
+        result = self.session.stop() if self.session is not None else recorder.stop()
+        self.session = None
         self.meter_db = METER_FLOOR_DB
         if recorder.error:
             self.notify(recorder.error, "error")
@@ -171,14 +210,79 @@ class TuiApp:
                 f" {ui.format_size(result.size_bytes)})",
                 "success",
             )
-            if analysis_available():
-                self.analyse_prompt = (
-                    f"{result.path.name}   "
-                    f"{ui.format_duration(result.duration)}   "
-                    f"{ui.format_size(result.size_bytes)}"
+            self._pending = (result, silences, changes)
+            tracks = len({c.track.trackid for c in changes})
+            if tracks >= 2:
+                self.split_prompt = (
+                    f"{tracks} tracks in {ui.format_duration(result.duration)}"
                 )
+            elif analysis_available():
+                self.analyse_prompt = self._analyse_offer(result)
         self.recorder = None
         self.next_name = None
+
+    def _analyse_offer(self, result) -> str:
+        return (
+            f"{result.path.name}   "
+            f"{ui.format_duration(result.duration)}   "
+            f"{ui.format_size(result.size_bytes)}"
+        )
+
+    def answer_split_prompt(self, key: str) -> bool:
+        """Handle the question asked when several tracks were recorded."""
+        if key in ("y", "Y", "\r", "\n"):
+            self.split_prompt = None
+            self.split_last()
+            return True
+        self.split_prompt = None
+        if key in ("n", "N", "\x1b"):
+            self.notify("Kept as one file.")
+            self._offer_analysis()
+            return True
+        return False
+
+    def split_last(self) -> None:
+        """Cut the recording just made into one file per track."""
+        self.split_prompt = None
+        if not self._pending:
+            return
+        result, silences, changes = self._pending
+        self.notify("Splitting…")
+        self.draw(force=True)
+        options = capture.SplitOptions(
+            enabled=True,
+            min_gap=self.split_options.min_gap,
+            min_track=self.split_options.min_track,
+            pad=self.split_options.pad,
+            directory=result.path.parent,
+        )
+        try:
+            outcome = capture.split_recording(
+                result, silences, changes, options, self.audio_format
+            )
+        except Exception as exc:
+            self.notify(str(exc), "error")
+            return
+        if not outcome.happened:
+            self.notify(f"Not split: {outcome.reason}")
+        else:
+            self._pieces = list(outcome.written)
+            for path in outcome.written:
+                self.recordings.append(f"  {path.name}")
+            self.notify(
+                f"Split into {len(outcome.written)} files, "
+                f"named from {'the player' if outcome.named else 'numbering'}.",
+                "success",
+            )
+        self._offer_analysis()
+
+    def _offer_analysis(self) -> None:
+        if not analysis_available() or not self._pending:
+            return
+        if self._pieces:
+            self.analyse_prompt = f"{len(self._pieces)} files just split out"
+        else:
+            self.analyse_prompt = self._analyse_offer(self._pending[0])
 
     def answer_analyse_prompt(self, key: str) -> bool:
         """Handle the question asked after a take. True when the key was used."""
@@ -193,9 +297,12 @@ class TuiApp:
         return False        # any other key falls through to its normal action
 
     def analyse_last(self) -> None:
-        """Write a chord chart for the most recent recording."""
+        """Write a chord chart for the most recent recording, or for its pieces."""
         self.analyse_prompt = None
         if self.busy("Stop recording before analysing."):
+            return
+        if self._pieces:
+            self.analyse_pieces()
             return
         if self.last_recording is None or not self.last_recording.is_file():
             self.notify("Record something first, then press a to analyse it.", "error")
@@ -226,6 +333,33 @@ class TuiApp:
             f" {analysis.bar_count} bars",
             "success",
         )
+
+    def analyse_pieces(self) -> None:
+        """Chart each file a split produced. One failure keeps the rest."""
+        from .analysis.report import analyse_file
+
+        charted = 0
+        for path in self._pieces:
+            self.notify(f"Analysing {path.name}…")
+            self.draw(force=True)
+            try:
+                analysis = analyse_file(path)
+                target = write_chart(
+                    analysis,
+                    default_chart_path(path, self.chart_format),
+                    self.chart_format,
+                )
+            except Exception:
+                continue
+            charted += 1
+            self.recordings.append(
+                f"  {target.name}   {analysis.key.short_name}"
+                f"   {analysis.tempo:.0f} BPM   {analysis.bar_count} bars"
+            )
+        if charted:
+            self.notify(f"Charted {charted} of {len(self._pieces)} files.", "success")
+        else:
+            self.notify("None of the pieces could be charted.", "error")
 
     def cycle_chart_format(self) -> None:
         index = CHART_FORMATS.index(self.chart_format)
@@ -290,6 +424,8 @@ class TuiApp:
     def handle_key(self, key: str) -> None:
         if self.name_prompt is not None:
             self.handle_name_key(key)
+            return
+        if self.split_prompt is not None and self.answer_split_prompt(key):
             return
         if self.analyse_prompt is not None and self.answer_analyse_prompt(key):
             return
@@ -375,6 +511,8 @@ class TuiApp:
             self.sources = list_monitors()
         except AudioSystemError as exc:
             self.notify(str(exc), "error")
+        if self.player is None:
+            self.player = capture.choose_player(self.split_options.player)
         self.refresh_update_notice()
         with raw_terminal():
             sys.stdout.write(ENTER_ALT_SCREEN + HIDE_CURSOR + CLEAR_SCREEN)
@@ -402,6 +540,13 @@ class TuiApp:
                 if not self.running:
                     break
             recorder = self.recorder
+            if recorder is not None and recorder.is_running:
+                if self._stopper.should_stop(recorder):
+                    self.notify(
+                        f"Silent for {self.stop_after_silence:g}s \u2014 stopping."
+                    )
+                    self.stop_recording()
+                    continue
             if recorder is not None and not recorder.is_running:
                 # ffmpeg exited by itself, which usually means the source vanished.
                 self.stop_recording()
@@ -455,6 +600,8 @@ def run_tui(
     format_name: str,
     output_dir: Path | None,
     bitrate: str | None,
+    split_options: capture.SplitOptions | None = None,
+    stop_after_silence: float = 0.0,
 ) -> int:
     """Entry point used by the CLI."""
     audio_format = get_format(format_name)
@@ -464,6 +611,8 @@ def run_tui(
         audio_format=audio_format,
         output_dir=output_dir or default_output_dir(),
         bitrate=bitrate,
+        split_options=split_options,
+        stop_after_silence=stop_after_silence,
     )
     signal.signal(signal.SIGINT, signal.default_int_handler)
     return app.run()

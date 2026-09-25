@@ -1,9 +1,9 @@
 # Plan: split a playlist capture into one file per track
 
-Status: **phases 1-3 done.** `omacap record --split` records a playlist and cuts
-it into named files, verified end to end against a real Spotify client. Phase 4
-- charting each piece is already there via `--analyze`, but the TUI prompt and
-stopping on a long silence are not - is still to do. Written 2026-09-25.
+Status: **done.** All four phases are built and verified against real playback:
+`omacap record --split`, `omacap split`, `omacap nowplaying`, the interface's
+split and analysis questions, and stopping on a long silence.
+Written 2026-09-25.
 
 The idea: while recording a streaming playlist, read what the player says is
 playing, and at the end cut the single capture into one file per track, named
@@ -78,7 +78,7 @@ the timeline directly in *file* time. No wall-clock mapping is needed.
 | `splitter.py` | cut the file with ffmpeg, validate the segments | 130 lines |
 | `recorder.py` | `silencedetect` in the chain, its events parsed, `silences` and `silent_for` exposed | done |
 | `capture.py` | recorder and watcher on one timeline, then the cut | done |
-| `cli.py` | `split`, `nowplaying`, `record --split` | done; the TUI is phase 4 |
+| `cli.py` / `tui.py` | `split`, `nowplaying`, `record --split`, the interface's questions | done |
 
 `timeline.py` is deliberately I/O-free: every awkward decision lives there, so it
 is entirely table-testable without any audio.
@@ -203,7 +203,7 @@ The project's existing patterns fit this directly.
 | **1** ✅ | `nowplaying.py` + `omacap nowplaying` | Done. The D-Bus-to-audio delay is measured; see below. |
 | **2** ✅ | silence events + `omacap split FILE` | Done. Useful on its own, independent of MPRIS |
 | **3** ✅ | live timeline + `record --split` with names | Done. Verified against Spotify: two correctly named files either side of a real track change. |
-| **4** | per-segment analysis, TUI prompt, auto-stop | The convenience |
+| **4** ✅ | per-segment analysis, TUI prompt, auto-stop | Done. Verified by driving the real interface across three track changes. |
 
 Phase 1 comes first deliberately: it measures the delay *before* anything is
 built on top of assuming it.

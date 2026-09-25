@@ -28,6 +28,7 @@ class FakeRecorder:
         self.size_bytes = 0
         self.is_running = False
         self.stopped = False
+        self.silences: list = []
         FakeRecorder.instances.append(self)
 
     def start(self):
@@ -586,3 +587,224 @@ def test_a_failing_update_check_is_invisible(app, monkeypatch):
     monkeypatch.setattr(tui, "pending_update", boom)
     app.refresh_update_notice()
     assert app.update_notice == ""
+
+
+# -- splitting from the interface -----------------------------------------
+
+def record_tracks(app, titles, gap_at=None):
+    """Record a take that the player reported several tracks during."""
+    from omacap.nowplaying import Track, TrackChange
+
+    press(app, " ")
+    recorder = app.recorder
+    recorder.silences = [] if gap_at is None else [tui.capture.timeline.Silence(*gap_at)]
+    app.session.watcher = type("W", (), {
+        "tracks": [TrackChange(at=float(i * 60), track=Track(f"/t/{i}", title=t))
+                   for i, t in enumerate(titles)],
+        "stop": lambda self=None, **k: None,
+    })()
+    press(app, " ")
+    return recorder
+
+
+def test_several_tracks_bring_up_the_split_question(app):
+    record_tracks(app, ["One", "Two", "Three"])
+    vm = app.view_model()
+    assert vm.split_prompt is not None
+    assert "3 tracks" in vm.split_prompt
+    assert "split into separate files?" in "\n".join(
+        tui.ui.render(vm, 76, use_color=False)
+    )
+
+
+def test_one_track_asks_about_analysis_instead(app):
+    record_tracks(app, ["Only One"])
+    assert app.split_prompt is None
+    assert app.analyse_prompt is not None
+
+
+def test_no_tracks_at_all_asks_about_analysis(app):
+    press(app, " ")
+    press(app, " ")
+    assert app.split_prompt is None
+    assert app.analyse_prompt is not None
+
+
+def test_pressing_y_splits(app, monkeypatch):
+    from omacap.capture import SplitResult
+
+    pieces = [Path("/tmp/01 - One.mp3"), Path("/tmp/02 - Two.mp3")]
+    monkeypatch.setattr(
+        tui.capture, "split_recording",
+        lambda *a, **k: SplitResult(written=pieces, named=True),
+    )
+    monkeypatch.setattr(tui, "analysis_available", lambda: False)
+
+    record_tracks(app, ["One", "Two"])
+    press(app, "y")
+    assert app.split_prompt is None
+    assert app.message_kind == "success"
+    assert "Split into 2 files" in app.message
+    assert any("01 - One.mp3" in entry for entry in app.recordings)
+
+
+def test_pressing_n_keeps_one_file(app, monkeypatch):
+    monkeypatch.setattr(
+        tui.capture, "split_recording",
+        lambda *a, **k: pytest.fail("should not have split"),
+    )
+    monkeypatch.setattr(tui, "analysis_available", lambda: False)
+    record_tracks(app, ["One", "Two"])
+    press(app, "n")
+    assert app.split_prompt is None
+    assert "Kept as one file" in app.message
+
+
+def test_the_analysis_question_follows_the_split_question(app, monkeypatch):
+    from omacap.capture import SplitResult
+
+    pieces = [Path("/tmp/01 - One.mp3"), Path("/tmp/02 - Two.mp3")]
+    monkeypatch.setattr(tui.capture, "split_recording",
+                        lambda *a, **k: SplitResult(written=pieces, named=True))
+    record_tracks(app, ["One", "Two"])
+    press(app, "y")
+    assert app.analyse_prompt is not None
+    assert "2 files" in app.analyse_prompt
+
+
+def test_declining_the_split_still_offers_analysis(app, monkeypatch):
+    monkeypatch.setattr(tui.capture, "split_recording", lambda *a, **k: None)
+    record_tracks(app, ["One", "Two"])
+    press(app, "n")
+    assert app.analyse_prompt is not None
+
+
+def test_analysis_after_a_split_charts_the_pieces(app, monkeypatch, tmp_path):
+    from omacap.capture import SplitResult
+
+    pieces = []
+    for name in ("01 - One.mp3", "02 - Two.mp3"):
+        path = tmp_path / name
+        path.write_bytes(b"\0" * 64)
+        pieces.append(path)
+    charted = []
+
+    monkeypatch.setattr(tui.capture, "split_recording",
+                        lambda *a, **k: SplitResult(written=pieces, named=True))
+    monkeypatch.setattr(
+        "omacap.analysis.report.analyse_file",
+        lambda path, **kw: charted.append(path) or _FakeAnalysis(),
+    )
+    monkeypatch.setattr(tui, "write_chart", lambda a, target, fmt, *rest: target)
+
+    record_tracks(app, ["One", "Two"])
+    press(app, "y")
+    press(app, "y")
+    assert charted == pieces
+    assert "Charted 2 of 2" in app.message
+
+
+def test_a_failed_split_is_reported_not_raised(app, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(tui.capture, "split_recording", boom)
+    record_tracks(app, ["One", "Two"])
+    press(app, "y")
+    assert app.message_kind == "error"
+    assert "disk full" in app.message
+    assert app.running is True
+
+
+def test_a_split_that_found_nothing_says_so(app, monkeypatch):
+    from omacap.capture import SplitResult
+
+    monkeypatch.setattr(tui.capture, "split_recording",
+                        lambda *a, **k: SplitResult(reason="only one piece was found"))
+    monkeypatch.setattr(tui, "analysis_available", lambda: False)
+    record_tracks(app, ["One", "Two"])
+    press(app, "y")
+    assert "Not split" in app.message
+
+
+def test_a_new_take_withdraws_the_split_question(app):
+    record_tracks(app, ["One", "Two"])
+    assert app.split_prompt is not None
+    press(app, " ")
+    assert app.split_prompt is None
+
+
+def test_the_split_question_does_not_block_quitting(app):
+    record_tracks(app, ["One", "Two"])
+    press(app, "q")
+    assert app.running is False
+
+
+# -- stopping on silence ---------------------------------------------------
+
+def test_the_watchdog_is_off_by_default(app):
+    press(app, " ")
+    app.recorder.duration = 600.0
+    app.recorder.silent_for = 600.0
+    assert app._stopper.should_stop(app.recorder) is False
+
+
+def test_a_long_silence_stops_the_recording(app):
+    app.stop_after_silence = 10.0
+    press(app, " ")
+    recorder = app.recorder
+    recorder.duration = 60.0
+    recorder.silent_for = 0.0
+    assert app._stopper.should_stop(recorder) is False   # arms here
+    recorder.duration = 75.0
+    recorder.silent_for = 15.0
+    assert app._stopper.should_stop(recorder) is True
+
+
+def test_silence_before_any_audio_never_stops_it(app):
+    """Starting omacap before pressing play must not stop it straight away."""
+    app.stop_after_silence = 5.0
+    press(app, " ")
+    recorder = app.recorder
+    for elapsed in (2.0, 10.0, 60.0):
+        recorder.duration = elapsed
+        recorder.silent_for = elapsed
+        assert app._stopper.should_stop(recorder) is False
+
+
+# -- what the panel shows --------------------------------------------------
+
+def test_the_player_is_shown_when_one_is_followed(app, monkeypatch):
+    from omacap.nowplaying import Track
+
+    app.player = "org.mpris.MediaPlayer2.spotify"
+    monkeypatch.setattr(
+        "omacap.nowplaying.current_track",
+        lambda player: Track("/t/1", title="Song", artist="Band"),
+    )
+    assert "Band – Song" in app.view_model().player_label
+
+
+def test_no_player_means_no_row(app):
+    app.player = None
+    assert app.view_model().player_label == ""
+    assert "Playing" not in "\n".join(
+        tui.ui.render(app.view_model(), 76, use_color=False)
+    )
+
+
+def test_a_player_started_after_omacap_is_still_found(app, monkeypatch):
+    """People open omacap first and start the music afterwards."""
+    app.player = None
+    monkeypatch.setattr(tui.capture, "choose_player",
+                        lambda name: "org.mpris.MediaPlayer2.spotify")
+    press(app, " ")
+    assert app.player == "org.mpris.MediaPlayer2.spotify"
+
+
+def test_a_player_found_at_startup_is_not_looked_up_again(app, monkeypatch):
+    app.player = "org.mpris.MediaPlayer2.mpv"
+    monkeypatch.setattr(tui.capture, "choose_player",
+                        lambda name: pytest.fail("already known"))
+    press(app, " ")
+    assert app.player == "org.mpris.MediaPlayer2.mpv"

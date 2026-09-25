@@ -100,6 +100,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="show the version and the installed revision, then exit",
     )
     _add_common(parser)
+    _add_split_options(parser)
+    parser.add_argument(
+        "--stop-after-silence", type=float, default=0.0, metavar="SECONDS",
+        help="stop recording once it has been silent this long; 0 turns it off",
+    )
+    parser.add_argument(
+        "--player", metavar="NAME",
+        help="MPRIS bus name to follow (default: Spotify if running)",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     record = subparsers.add_parser(
@@ -128,8 +137,14 @@ def build_parser() -> argparse.ArgumentParser:
              "each one from the media player",
     )
     record.add_argument(
-        "--player", metavar="NAME",
+        "--player", default=argparse.SUPPRESS, metavar="NAME",
         help="MPRIS bus name to follow (default: Spotify if running)",
+    )
+    record.add_argument(
+        "--stop-after-silence", type=float, default=None, metavar="SECONDS",
+        help="stop once the recording has been silent this long; 0 turns it off "
+             f"(default: {capture.DEFAULT_STOP_AFTER_SILENCE:g} with --split, "
+             f"otherwise off)",
     )
     _add_split_options(record)
     _add_analysis_options(record)
@@ -328,6 +343,13 @@ def cmd_tui(args: argparse.Namespace) -> int:
         format_name=args.format or DEFAULT_FORMAT,
         output_dir=Path(args.dir).expanduser() if args.dir else None,
         bitrate=args.bitrate,
+        split_options=capture.SplitOptions(
+            min_gap=args.min_gap,
+            min_track=args.min_track,
+            pad=args.pad,
+            player=args.player,
+        ),
+        stop_after_silence=args.stop_after_silence,
     )
 
 
@@ -343,6 +365,9 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     ensure_format(audio_format)
     splitting = getattr(args, "split", False)
+    stop_after = getattr(args, "stop_after_silence", None)
+    if stop_after is None:
+        stop_after = capture.DEFAULT_STOP_AFTER_SILENCE if splitting else 0.0
     recorder = Recorder(
         RecorderConfig(
             source=source,
@@ -352,7 +377,7 @@ def cmd_record(args: argparse.Namespace) -> int:
             duration=args.duration,
             meter=False,
             # Gaps are only worth reporting when something will act on them.
-            detect_silence=splitting,
+            detect_silence=splitting or stop_after > 0,
             silence_min_gap=min(
                 getattr(args, "min_gap", timeline.DEFAULT_MIN_GAP), 0.3
             ),
@@ -364,6 +389,8 @@ def cmd_record(args: argparse.Namespace) -> int:
         print(f"file    {output_path}")
         if args.duration:
             print(f"stops   after {args.duration:g}s")
+        elif stop_after > 0:
+            print(f"stops   on Ctrl-C, or after {stop_after:g}s of silence")
         else:
             print("stops   on Ctrl-C")
     split_options = capture.SplitOptions(
@@ -388,8 +415,14 @@ def cmd_record(args: argparse.Namespace) -> int:
     signal.signal(signal.SIGINT, lambda *_: stop_requested.set())
     signal.signal(signal.SIGTERM, lambda *_: stop_requested.set())
 
+    stopper = capture.SilenceStopper(stop_after)
+    stopped_by_silence = False
     while recorder.is_running and not stop_requested.wait(0.2):
-        pass
+        if stopper.should_stop(recorder):
+            stopped_by_silence = True
+            break
+    if stopped_by_silence and not args.quiet:
+        print(f"silence for {stop_after:g}s \u2014 stopping.")
     silences = recorder.silences
     if recorder.is_running:
         result = session.stop()

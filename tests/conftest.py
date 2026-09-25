@@ -49,6 +49,9 @@ duration = None
 if "-t" in args:
     duration = float(args[args.index("-t") + 1])
 metering = any("ametadata" in a for a in args)
+detecting = any("silencedetect" in a for a in args)
+# Play for a moment, then fall silent, so a watchdog has something to react to.
+AUDIBLE_SECONDS = 1.5
 
 stop = False
 def on_signal(signum, frame):
@@ -63,6 +66,7 @@ handle.write(b"HEADER--")
 handle.flush()
 
 elapsed = 0.0
+announced_silence = False
 step = 0.05
 written = 8
 while not stop and (duration is None or elapsed < duration):
@@ -73,6 +77,10 @@ while not stop and (duration is None or elapsed < duration):
     written += 480
     print(f"out_time_us={int(elapsed * 1_000_000)}", flush=True)
     print(f"total_size={written}", flush=True)
+    if detecting and not announced_silence and elapsed >= AUDIBLE_SECONDS:
+        print(f"[silencedetect @ 0x0] silence_start: {AUDIBLE_SECONDS}",
+              file=sys.stderr, flush=True)
+        announced_silence = True
     if metering:
         level = "-inf" if int(elapsed * 10) % 20 < 5 else f"{-30 + elapsed:.6f}"
         print(

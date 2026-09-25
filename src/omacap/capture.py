@@ -14,6 +14,14 @@ from pathlib import Path
 from . import nowplaying, splitter, timeline
 from .formats import AudioFormat
 from .recorder import Recorder, RecordingResult
+
+#: How long a recording must have been silent before it stops itself, when that
+#: is switched on at all.
+DEFAULT_STOP_AFTER_SILENCE = 30.0
+
+#: A recording has to contain this much audio before the silence watchdog arms.
+#: Starting omacap before pressing play would otherwise stop it immediately.
+ARMING_SECONDS = 1.0
 from .timeline import Segment
 
 
@@ -27,6 +35,33 @@ class SplitOptions:
     pad: float = timeline.DEFAULT_PAD
     directory: Path | None = None
     player: str | None = None
+
+
+class SilenceStopper:
+    """Stops a recording once it has been quiet long enough.
+
+    This is the end of a playlist: the music stops and nothing follows. It only
+    arms once some audio has actually been recorded, because otherwise starting
+    omacap before pressing play would stop it straight away.
+    """
+
+    def __init__(self, after: float = 0.0) -> None:
+        self.after = after
+        self.armed = False
+
+    @property
+    def enabled(self) -> bool:
+        return self.after > 0
+
+    def should_stop(self, recorder) -> bool:
+        if not self.enabled:
+            return False
+        if not self.armed:
+            # Everything except the trailing silence counts as audio heard.
+            if recorder.duration - recorder.silent_for >= ARMING_SECONDS:
+                self.armed = True
+            return False
+        return recorder.silent_for >= self.after
 
 
 @dataclass
