@@ -211,7 +211,7 @@ class TuiApp:
                 "success",
             )
             self._pending = (result, silences, changes)
-            tracks = len({c.track.trackid for c in changes})
+            tracks = len({c.track.identity for c in changes})
             if tracks >= 2:
                 self.split_prompt = (
                     f"{tracks} tracks in {ui.format_duration(result.duration)}"

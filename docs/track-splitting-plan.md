@@ -170,6 +170,7 @@ tracks?"*
 | Case | Handling |
 | --- | --- |
 | Adverts on a free account | `trackid` contains `/ad/` → drop that segment |
+| A player that never moves its `trackid` | Chromium publishes one id per session and changes only the title, so a track's identity is `(trackid, title, artist)`, not the id alone |
 | The same track twice in a row | `trackid` unchanged → no split, which is correct |
 | Rapid skipping | segments shorter than `--min-track` (default 20 s) are dropped |
 | Spotify started mid-recording | the poller tolerates the player being absent and appearing later |

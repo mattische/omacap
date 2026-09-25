@@ -111,7 +111,7 @@ class TrackSession:
 
     @property
     def track_count(self) -> int:
-        return len({c.track.trackid for c in self.changes})
+        return len({c.track.identity for c in self.changes})
 
 
 def choose_player(preferred: str | None = None) -> str | None:
@@ -133,7 +133,7 @@ def plan_segments(
     describes the whole recording and says nothing about where to cut. Silence is
     the fallback, and gives numbered pieces.
     """
-    if len({c.track.trackid for c in changes}) >= 2:
+    if len({c.track.identity for c in changes}) >= 2:
         segments = timeline.plan_from_changes(
             duration, changes, silences,
             min_gap=options.min_gap, min_track=options.min_track, pad=options.pad,

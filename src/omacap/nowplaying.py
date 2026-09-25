@@ -56,6 +56,18 @@ class Track:
         )
 
     @property
+    def identity(self) -> tuple[str, str, str]:
+        """What makes this a different track from the last one.
+
+        ``mpris:trackid`` alone is not enough. Chromium publishes one id for the
+        whole session and only changes the title, so keying on the id would see a
+        browser playing a playlist as a single endless track. Spotify's desktop
+        client does move the id, and including it keeps two different tracks that
+        happen to share a title apart.
+        """
+        return (self.trackid, self.title, self.artist)
+
+    @property
     def label(self) -> str:
         """A one-line description, for the interface."""
         if self.artist and self.title:
@@ -258,7 +270,7 @@ class TrackWatcher:
         if track is None:
             return None
         with self._lock:
-            if self.changes and self.changes[-1].track.trackid == track.trackid:
+            if self.changes and self.changes[-1].track.identity == track.identity:
                 return None
             change = TrackChange(at=self.clock(), track=track)
             self.changes.append(change)

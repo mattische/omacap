@@ -319,6 +319,13 @@ It reads the player over MPRIS, which every desktop media player publishes, so
 running the pieces are still cut on the silences, just numbered rather than named.
 Add `--analyze` and each piece gets its own chord chart.
 
+This is not Spotify-specific. Anything that publishes MPRIS works — mpv, VLC,
+Rhythmbox, Strawberry, Elisa — and so do **Firefox and Chromium**, which publish
+whatever is playing in a tab. Spotify, YouTube, Bandcamp or SoundCloud in a
+browser all name their tracks. Where several players are running, Spotify is
+preferred; `--player` picks a different one and `omacap nowplaying` lists the
+exact names.
+
 **A track change decides whether to cut; a silence decides where.** That matters:
 pausing or seeking inside a track makes silence but does not change the track, so
 neither splits the file. A track change with no silence around it — crossfade,

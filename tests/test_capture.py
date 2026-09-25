@@ -157,7 +157,9 @@ def test_no_player_gives_numbered_pieces():
 
 
 def test_the_same_track_repeated_is_not_two_tracks():
-    repeated = [change(0.0, "One"), TrackChange(91.57, Track("/t/One", title="One"))]
+    """Genuinely the same track: same id, same title, same artist."""
+    same = Track("/t/One", title="One", artist="Band")
+    repeated = [TrackChange(0.0, same), TrackChange(91.57, same)]
     _, named = plan_segments(
         180.0, [Silence(89.79, 92.24)], repeated, SplitOptions(min_track=5.0)
     )
@@ -244,3 +246,17 @@ def test_an_empty_recording_is_not_split(tmp_path):
 
 def test_a_split_result_reports_nothing_written():
     assert SplitResult().happened is False
+
+
+def test_a_browser_playlist_is_still_several_tracks():
+    """Chromium keeps one trackid for the session, so the title has to count."""
+    constant = "/org/chromium/MediaPlayer2/TrackList/Track880048"
+    changes = [
+        TrackChange(0.0, Track(constant, title="One", artist="Band")),
+        TrackChange(91.57, Track(constant, title="Two", artist="Band")),
+    ]
+    segments, named = plan_segments(
+        180.0, [Silence(89.79, 92.24)], changes, SplitOptions(min_track=5.0)
+    )
+    assert named is True
+    assert [s.basename() for s in segments] == ["01 - Band - One", "02 - Band - Two"]

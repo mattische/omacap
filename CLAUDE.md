@@ -116,6 +116,11 @@ Worth knowing so they are not reintroduced:
   else.
 - **A stale update notice.** The cache can outlive the update it warned about, so
   `pending_update()` re-reads the local revision before showing anything.
+- **`mpris:trackid` is not an identity.** Chromium publishes one id for a whole
+  browser session and changes only the title, so keying track changes on the id
+  saw a browser playlist as a single endless track. A track is identified by
+  `(trackid, title, artist)`. Spotify's desktop client does move the id, which is
+  why this went unnoticed until the same playlist was played in a browser.
 
 ## Measured accuracy
 

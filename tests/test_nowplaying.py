@@ -281,3 +281,42 @@ def test_the_watcher_is_thread_safe(busctl):
     for t in threads:
         t.join()
     assert not errors
+
+
+# -- what counts as a different track --------------------------------------
+
+def test_a_player_that_never_moves_its_trackid_still_works(busctl):
+    """Chromium publishes one trackid for the whole session and only changes the
+    title, so keying on the id alone sees a browser playlist as one endless track."""
+    constant = "/org/chromium/MediaPlayer2/TrackList/Track880048AED15C7770"
+    busctl(metadata=[
+        mpris_track(constant, title="Danceteria Afterhours", artist=["Madonna"]),
+        mpris_track(constant, title="Kejsar", artist=["A36"]),
+    ])
+    watcher = make_watcher()
+    watcher.poll_once()
+    watcher.poll_once()
+    assert [c.track.title for c in watcher.tracks] == [
+        "Danceteria Afterhours", "Kejsar"
+    ]
+
+
+def test_the_same_track_is_still_only_one_track(busctl):
+    busctl(metadata=[mpris_track("/t/1", title="One", artist=["Band"])])
+    watcher = make_watcher()
+    watcher.poll_once()
+    watcher.poll_once()
+    assert len(watcher.tracks) == 1
+
+
+def test_identity_uses_more_than_the_trackid():
+    same_id = Track("/same", title="One", artist="Band")
+    other_title = Track("/same", title="Two", artist="Band")
+    other_artist = Track("/same", title="One", artist="Other")
+    assert same_id.identity != other_title.identity
+    assert same_id.identity != other_artist.identity
+
+
+def test_identity_still_separates_two_tracks_sharing_a_title():
+    """A live and a studio take can have the same name; the id keeps them apart."""
+    assert Track("/a", title="Song").identity != Track("/b", title="Song").identity
