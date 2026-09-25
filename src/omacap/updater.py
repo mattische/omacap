@@ -64,6 +64,9 @@ class UpdateStatus:
     remote: str = ""
     checked_at: float = 0.0
     error: str = ""
+    #: Which checkout this was about. The cache is per user, but a machine can
+    #: hold several installs, and one must not report another's revisions.
+    checkout: str = ""
 
     @property
     def age(self) -> float:
@@ -176,6 +179,7 @@ def read_status() -> UpdateStatus | None:
             remote=str(data.get("remote", "")),
             checked_at=float(data.get("checked_at", 0.0)),
             error=str(data.get("error", "")),
+            checkout=str(data.get("checkout", "")),
         )
     except (TypeError, ValueError):
         return None
@@ -193,6 +197,7 @@ def write_status(status: UpdateStatus) -> None:
                     "remote": status.remote,
                     "checked_at": status.checked_at,
                     "error": status.error,
+                    "checkout": status.checkout,
                 }
             ),
             encoding="utf-8",
@@ -222,6 +227,7 @@ def check_now(installation: Installation | None = None) -> UpdateStatus:
         remote=remote,
         checked_at=time.time(),
         error="" if remote else "could not reach the remote",
+        checkout=str(root),
     )
     write_status(status)
     return status
@@ -252,12 +258,19 @@ def pending_update() -> UpdateStatus | None:
     if check_disabled():
         return None
     status = read_status()
+    installation = find_installation()
+    current = str(installation.checkout) if installation.checkout else ""
+
+    # A cache written by a different install on the same machine says nothing
+    # about this one, and must not be shown or trusted as fresh.
+    if status is not None and status.checkout and status.checkout != current:
+        status = None
+
     if status is None or status.stale:
         start_background_check()
     if status is None or not status.available:
         return None
-    # The cache may pre-date an update the user already installed.
-    installation = find_installation()
+    # The cache may also pre-date an update that has since been installed.
     if installation.checkout is not None:
         if local_revision(installation.checkout) == status.remote:
             return None
@@ -342,7 +355,13 @@ def apply_update(installation: Installation | None = None) -> UpdateResult:
         )
 
     write_status(
-        UpdateStatus(available=False, local=current, remote=current, checked_at=time.time())
+        UpdateStatus(
+            available=False,
+            local=current,
+            remote=current,
+            checked_at=time.time(),
+            checkout=str(root),
+        )
     )
     return UpdateResult(
         updated=True,

@@ -318,3 +318,41 @@ def _recording_pip(real_run, sink):
         return real_run(command, *args, **kwargs)
 
     return wrapper
+
+
+def test_one_installs_cache_is_not_shown_to_another(checkout, tmp_path, cache, monkeypatch):
+    """Two installs share one cache file; neither may report the other's state."""
+    other = tmp_path / "another-install"
+    other.mkdir()
+    write_status(
+        UpdateStatus(
+            available=True, local="aaaaaaa", remote="bbbbbbb",
+            checked_at=time.time(), checkout=str(other),
+        )
+    )
+    monkeypatch.setattr(
+        updater, "find_installation", lambda: Installation(checkout, managed=False)
+    )
+    monkeypatch.setattr(updater, "start_background_check", lambda: None)
+    assert pending_update() is None
+
+
+def test_a_check_records_which_install_it_was_about(checkout, cache):
+    check_now(Installation(checkout=checkout, managed=False))
+    assert read_status().checkout == str(checkout)
+
+
+def test_a_cache_without_a_checkout_is_still_accepted(checkout, remote_repo, cache, monkeypatch):
+    """Caches written by an older omacap have no checkout recorded."""
+    push_commit(remote_repo)
+    write_status(
+        UpdateStatus(
+            available=True, local=local_revision(checkout), remote="bbbbbbb",
+            checked_at=time.time(),
+        )
+    )
+    monkeypatch.setattr(
+        updater, "find_installation", lambda: Installation(checkout, managed=False)
+    )
+    monkeypatch.setattr(updater, "start_background_check", lambda: None)
+    assert pending_update() is not None
