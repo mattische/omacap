@@ -7,7 +7,9 @@ speakers — so it captures any application: a browser tab, a DAW, a video call,
 music player. No cables, no microphone, no re-routing.
 
 It gives you a small terminal interface where **space** starts and stops the
-recording, and a plain CLI for scripts.
+recording, and a plain CLI for scripts. If what you recorded is music, it can
+also work out the key, tempo, time signature and the chords in every bar, and
+write that out as a chord chart.
 
 ```
 ┌ omacap ────────────────────────────────────────────────────── v0.1.0 ┐
@@ -19,12 +21,13 @@ recording, and a plain CLI for scripts.
 │  Format  mp3  ·  192k                                                │
 │          Lossy, universally playable. Good default for sharing.      │
 │  Folder  ~/Recordings/omacap                                         │
+│  Chart   .md                                                         │
 │                                                                      │
 ├ saved this session ──────────────────────────────────────────────────┤
 │  omacap_2026-09-25_08-52-01.mp3   00:42   1.1 MB                     │
 ├──────────────────────────────────────────────────────────────────────┤
 │  space stop · f format · b bitrate · d source                        │
-│  n name · ? help · q quit                                            │
+│  a analyse · n name · t chart · ? help · q quit                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,7 +38,8 @@ recording, and a plain CLI for scripts.
 | Linux with PipeWire or PulseAudio | provides the monitor source that carries playback audio | PipeWire's PulseAudio layer works as-is |
 | `ffmpeg` | captures and encodes the audio | must be on your `PATH` |
 | `pactl` | lists the available sources | ships with `libpulse` / `pulseaudio-utils` |
-| Python 3.10+ | runs omacap | no third-party Python packages needed |
+| Python 3.10+ | runs omacap | recording needs no third-party packages |
+| numpy *(optional)* | chord, key and tempo detection | only for `omacap analyze`; `pip install 'omacap[analyze]'` |
 
 Install the system packages:
 
@@ -70,6 +74,14 @@ everywhere without activating anything, use [pipx](https://pipx.pypa.io):
 pipx install /path/to/omacap
 ```
 
+To include the musical analysis (Step 2), install the `analyze` extra:
+
+```bash
+pip install '.[analyze]'        # or: pipx install '/path/to/omacap[analyze]'
+```
+
+Recording works without it. The extra pulls in numpy and nothing else.
+
 Check that everything is in place:
 
 ```bash
@@ -84,6 +96,7 @@ omacap 0.1.0
 [ok] monitors  4 playback monitor(s) found
 [ok] default   alsa_output.usb-Generic_USB_Audio-00.analog-stereo.monitor
 [ok] folder    /home/you/Recordings/omacap is writable
+[ok] analysis  numpy 2.5.3 - chord charts available
 
 Everything looks good.
 ```
@@ -107,6 +120,8 @@ you are done. The file is written to `~/Recordings/omacap`.
 | `b` | cycle the bitrate (lossy formats only) |
 | `d` | cycle the capture source |
 | `n` | name the next recording |
+| `a` | analyse the last take into a chord chart |
+| `t` | chart format: markdown or plain text |
 | `?` or `h` | show the key list |
 | `q` | quit |
 
@@ -151,6 +166,115 @@ omacap doctor     # check the installation
 | `-q, --quiet` | *(record)* print only the saved path |
 
 Set `OMACAP_OUTPUT_DIR` to change the default folder permanently.
+
+## Chord charts
+
+Point `omacap analyze` at any recording and it writes a chord chart next to it:
+
+```bash
+omacap analyze ~/Recordings/omacap/omacap_2026-09-25_08-52-01.mp3
+```
+
+```
+key     G major (1 sharp)
+tempo   124 BPM
+metre   4/4
+bars    139
+chart   /home/you/Recordings/omacap/omacap_2026-09-25_08-52-01.md
+```
+
+The chart itself:
+
+````markdown
+# omacap_2026-09-25_08-52-01
+
+| | |
+| --- | --- |
+| **Key** | G major (1 sharp) |
+| **Tempo** | 124 BPM |
+| **Time signature** | 4/4 |
+| **Bars** | 139 |
+| **Length** | 4:30 |
+| **Chords used** | D, C, Em, D7 |
+| **Confidence** | key high, tempo high, time signature high |
+
+## Chart
+
+Bars read left to right, 4 per line.
+
+```
+ 1 | D      | C      | Em     | D      |
+ 5 | D      | C      | Em     | D      |
+ 9 | D      | C      | C Em   | D      |
+```
+````
+
+In the interactive interface, press **a** after a take to do the same thing, and
+**t** to switch between `.md` and `.txt`.
+
+### Analysis options
+
+| Option | Meaning |
+| --- | --- |
+| `-o, --output` | chart file to write (default: beside the recording) |
+| `-t, --chart-format` | `md` or `txt` (default: `md`, or taken from `--output`) |
+| `-c, --chords` | vocabulary: `simple`, `standard` (default) or `full` |
+| `--bars-per-line` | bars per line in the grid (default: 4) |
+| `-p, --print` | print the chart instead of writing a file |
+
+The chord vocabulary is the setting worth knowing about:
+
+| Value | Chords written | Good for |
+| --- | --- | --- |
+| `simple` | major and minor triads only | the most readable chart; what most people want |
+| `standard` | adds sevenths (`7`, `m7`) | pop and rock with a bit more colour |
+| `full` | adds `maj7`, `sus4`, `dim` | jazz, or when you want every detail |
+
+A narrower vocabulary means fewer chords to second-guess. `simple` often turns a
+busy chart into an obvious four-bar loop.
+
+### What it can and cannot do
+
+Detected: **time signature** (4/4, 3/4, 6/8, 5/4, 7/8), **key** (all 24 major and
+minor keys, with the key signature), **tempo** in BPM, the **number of bars**, and
+the **chords in each bar**.
+
+Every chart carries a confidence line — `key high, tempo high, time signature
+low` — because some of this is genuinely ambiguous:
+
+- **Relative keys.** A minor and C major use identical notes. omacap decides
+  between them from the chord sequence, which is usually right but not always.
+- **3/4 against 6/8.** These are the same pulse grouped differently; only how
+  strongly the middle of the bar is accented separates them.
+- **2/4.** Indistinguishable from 4/4 in audio, and reported as 4/4 — which is
+  how popular music writes it anyway.
+- **Sevenths and suspensions.** A melody note passing over a triad looks a lot
+  like an extension. Use `--chords simple` if that gets noisy.
+- **Tempo doubling.** A tempo and half that tempo fit the same beats; omacap
+  picks the one that accounts for more of the onsets.
+
+Treat it as a good first draft of a chart, not a transcription. It is accurate on
+material with a steady pulse and clear harmony, and vaguer on free time, solo
+melody, speech or heavy distortion.
+
+### How the analysis works
+
+No machine learning and no scientific stack — just numpy and ffmpeg:
+
+1. **Decode** to mono 22 kHz through ffmpeg, then trim leading and trailing silence.
+2. **Chromagram**: an STFT mapped onto semitone bands and folded into twelve
+   pitch classes.
+3. **Onset strength**: spectral flux, with a local median removed so a loud
+   chorus does not drown out a quiet verse.
+4. **Tempo**: autocorrelation of the onset envelope under a log-normal prior,
+   then beats placed by dynamic programming, then the tempo refined by fitting a
+   line through the beat times.
+5. **Metre**: beats are grouped by testing each candidate against how accented
+   the candidate downbeats are and how often chords change on them.
+6. **Chords**: chroma averaged per beat and correlated against chord templates,
+   then smoothed by a Viterbi pass that charges a fixed cost per chord change.
+7. **Key**: Krumhansl-Schmuckler profiles, with the chord sequence casting the
+   deciding vote between a key and its relative.
 
 ## Formats
 
@@ -210,14 +334,11 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The test suite needs no sound card: a stub `ffmpeg` on `PATH` stands in for the
-real one, so process handling, progress parsing and shutdown behaviour are all
-exercised for real while staying reproducible.
-
-## Roadmap
-
-Step 2 will analyse recorded music and write out a chord chart — time signature,
-key, tempo, bar count and the chords per bar — as `.txt` or Markdown.
+The test suite needs no sound card and no music files. Recording is tested
+against a stub `ffmpeg` on `PATH`, so process handling, progress parsing and
+shutdown behaviour are exercised for real while staying reproducible. The
+analysis is tested against synthesised audio with a known tempo, key, metre and
+chord progression, so every claim it makes is checked against ground truth.
 
 ## License
 

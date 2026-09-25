@@ -13,6 +13,7 @@ import tty
 from pathlib import Path
 
 from . import ui
+from .chart import CHART_FORMATS, default_chart_path, write_chart
 from .devices import AudioSystemError, Source, list_monitors, resolve_source
 from .formats import AudioFormat, get_format, next_format
 from .recorder import (
@@ -57,6 +58,8 @@ class TuiApp:
         self.output_dir = output_dir
         self.bitrate = bitrate or audio_format.default_bitrate
         self.recorder: Recorder | None = None
+        self.last_recording: Path | None = None
+        self.chart_format: str = CHART_FORMATS[0]
         self.next_name: str | None = None
         self.name_prompt: str | None = None
         self.recordings: list[str] = []
@@ -90,6 +93,8 @@ class TuiApp:
             size_bytes=recorder.size_bytes if active else 0,
             meter_db=self.meter_db,
             next_name=self.next_name,
+            chart_format=self.chart_format,
+            can_analyse=self.last_recording is not None,
             recordings=self.recordings,
             message=self.message,
             message_kind=self.message_kind,
@@ -138,6 +143,7 @@ class TuiApp:
         if recorder.error:
             self.notify(recorder.error, "error")
         else:
+            self.last_recording = result.path
             self.recordings.append(
                 f"{result.path.name}   {ui.format_duration(result.duration)}"
                 f"   {ui.format_size(result.size_bytes)}"
@@ -150,6 +156,45 @@ class TuiApp:
             )
         self.recorder = None
         self.next_name = None
+
+    def analyse_last(self) -> None:
+        """Write a chord chart for the most recent recording."""
+        if self.busy("Stop recording before analysing."):
+            return
+        if self.last_recording is None or not self.last_recording.is_file():
+            self.notify("Record something first, then press a to analyse it.", "error")
+            return
+
+        self.notify(f"Analysing {self.last_recording.name}\u2026")
+        self.draw(force=True)
+        try:
+            from .analysis.report import analyse_file
+
+            analysis = analyse_file(self.last_recording)
+            target = write_chart(
+                analysis,
+                default_chart_path(self.last_recording, self.chart_format),
+                self.chart_format,
+            )
+        except Exception as exc:  # surfaced in the interface, never a traceback
+            self.notify(str(exc), "error")
+            return
+        self.recordings.append(
+            f"{target.name}   {analysis.key.short_name}"
+            f"   {analysis.tempo:.0f} BPM   {analysis.meter.name}"
+            f"   {analysis.bar_count} bars"
+        )
+        self.notify(
+            f"Chart written to {target.name}: {analysis.key.name},"
+            f" {analysis.tempo:.0f} BPM, {analysis.meter.name},"
+            f" {analysis.bar_count} bars",
+            "success",
+        )
+
+    def cycle_chart_format(self) -> None:
+        index = CHART_FORMATS.index(self.chart_format)
+        self.chart_format = CHART_FORMATS[(index + 1) % len(CHART_FORMATS)]
+        self.notify(f"Charts will be written as .{self.chart_format}.")
 
     def cycle_format(self, step: int = 1) -> None:
         if self.busy("Stop recording before changing the format."):
@@ -214,6 +259,10 @@ class TuiApp:
             self.cycle_bitrate()
         elif key == "d":
             self.cycle_source()
+        elif key == "a":
+            self.analyse_last()
+        elif key == "t":
+            self.cycle_chart_format()
         elif key == "n":
             if not self.busy("Stop recording before naming the next file."):
                 self.name_prompt = self.next_name or ""

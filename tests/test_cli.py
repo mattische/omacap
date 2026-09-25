@@ -174,3 +174,103 @@ def test_the_interactive_app_refuses_a_non_tty(capsys, stub_audio, monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert cli.main([]) == 1
     assert "needs a terminal" in capsys.readouterr().err
+
+
+# -- analyze --------------------------------------------------------------
+
+def _synthetic_wav(path: Path) -> Path:
+    import wave
+
+    import numpy as np
+
+    from synth import SR, song
+
+    audio = song([(0, ""), (7, ""), (9, "m"), (5, "")], bars=12)
+    pcm = (audio / max(float(np.abs(audio).max()), 1e-9) * 32000).astype("<i2")
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(SR)
+        handle.writeframes(pcm.tobytes())
+    return path
+
+
+@pytest.fixture
+def recording(tmp_path):
+    return _synthetic_wav(tmp_path / "Loop Take.wav")
+
+
+def test_analyze_writes_a_chart_beside_the_recording(capsys, recording):
+    assert cli.main(["analyze", str(recording)]) == 0
+    chart = recording.with_suffix(".md")
+    assert chart.is_file()
+    text = chart.read_text(encoding="utf-8")
+    assert text.startswith("# Loop Take")
+    assert "4/4" in text and "120 BPM" in text
+    out = capsys.readouterr().out
+    assert "key" in out and "tempo" in out and "bars" in out
+
+
+def test_analyse_is_accepted_as_a_spelling(recording):
+    assert cli.main(["analyse", str(recording)]) == 0
+    assert recording.with_suffix(".md").is_file()
+
+
+def test_analyze_honours_an_explicit_output(recording, tmp_path):
+    target = tmp_path / "charts" / "chart.txt"
+    assert cli.main(["analyze", str(recording), "-o", str(target)]) == 0
+    assert "```" not in target.read_text(encoding="utf-8")
+
+
+def test_the_output_extension_selects_the_chart_format(recording, tmp_path):
+    target = tmp_path / "chart.txt"
+    cli.main(["analyze", str(recording), "-o", str(target)])
+    assert "**" not in target.read_text(encoding="utf-8")
+
+
+def test_the_chart_format_flag_wins_over_the_extension(recording, tmp_path):
+    target = tmp_path / "chart.txt"
+    cli.main(["analyze", str(recording), "-o", str(target), "-t", "md"])
+    assert target.read_text(encoding="utf-8").startswith("# ")
+
+
+def test_analyze_can_print_instead_of_writing(capsys, recording):
+    assert cli.main(["analyze", str(recording), "--print"]) == 0
+    assert "# Loop Take" in capsys.readouterr().out
+    assert not recording.with_suffix(".md").exists()
+
+
+def test_the_simple_vocabulary_writes_only_triads(capsys, recording):
+    cli.main(["analyze", str(recording), "-c", "simple", "--print"])
+    grid = capsys.readouterr().out.split("```")[1]
+    assert "maj7" not in grid and "sus4" not in grid
+
+
+def test_bars_per_line_is_configurable(capsys, recording):
+    cli.main(["analyze", str(recording), "--bars-per-line", "2", "--print"])
+    grid = capsys.readouterr().out.split("```")[1].strip().splitlines()
+    assert len(grid) == 6          # 12 bars, two per line
+
+
+def test_a_missing_file_is_reported(capsys, tmp_path):
+    assert cli.main(["analyze", str(tmp_path / "gone.wav")]) == 1
+    assert "no such file" in capsys.readouterr().err
+
+
+def test_a_clip_too_short_to_analyse_is_reported(capsys, tmp_path):
+    import wave
+
+    path = tmp_path / "blip.wav"
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(22050)
+        handle.writeframes(b"\0\0" * 22050)
+    assert cli.main(["analyze", str(path)]) == 1
+    assert "omacap:" in capsys.readouterr().err
+
+
+def test_an_unknown_vocabulary_is_rejected(capsys, recording):
+    with pytest.raises(SystemExit):
+        cli.main(["analyze", str(recording), "-c", "bebop"])
+    assert "invalid choice" in capsys.readouterr().err

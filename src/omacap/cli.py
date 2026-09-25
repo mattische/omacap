@@ -10,7 +10,11 @@ import threading
 from pathlib import Path
 
 from . import __version__
+from .analysis import AnalysisUnavailable
+from .analysis.audio import DecodeError
+from .analysis.report import AnalysisError
 from .devices import AudioSystemError, list_monitors, list_sources, resolve_source
+from .analysis.chords import DEFAULT_VOCABULARY, VOCABULARIES
 from .formats import DEFAULT_FORMAT, FORMAT_NAMES, FORMATS, get_format
 from .recorder import (
     Recorder,
@@ -18,6 +22,13 @@ from .recorder import (
     RecorderError,
     build_output_path,
     default_output_dir,
+)
+from .chart import (
+    BARS_PER_LINE,
+    default_chart_path,
+    get_chart_format,
+    render,
+    write_chart,
 )
 from .ui import format_duration, format_size
 
@@ -29,6 +40,7 @@ examples:
   omacap record -o mix.flac     record to a specific file until Ctrl-C
   omacap devices                list the sources that carry playback audio
   omacap doctor                 check that everything needed is installed
+  omacap analyze song.mp3       write a chord chart next to the recording
 """
 
 
@@ -59,6 +71,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     record.add_argument("-n", "--name", help="basename for the generated filename")
     record.add_argument("-q", "--quiet", action="store_true", help="only print the saved path")
+
+    analyze = subparsers.add_parser(
+        "analyze",
+        aliases=["analyse"],
+        help="detect key, tempo, metre and chords, and write a chord chart",
+        description=(
+            "Analyse a recording and write a chord chart: time signature, key, "
+            "tempo, bar count and the chords in each bar."
+        ),
+    )
+    analyze.add_argument("file", help="audio file to analyse")
+    analyze.add_argument(
+        "-o", "--output", metavar="FILE",
+        help="chart file to write (default: next to the recording)",
+    )
+    analyze.add_argument(
+        "-t", "--chart-format", default=None, metavar="FMT",
+        choices=("md", "txt", "markdown", "text"),
+        help="chart format: md or txt (default: md, or taken from --output)",
+    )
+    analyze.add_argument(
+        "-c", "--chords", default=DEFAULT_VOCABULARY, metavar="SET",
+        choices=tuple(VOCABULARIES),
+        help=(
+            "chord vocabulary: simple (triads only), standard (adds sevenths) "
+            f"or full (adds suspensions and diminished). Default: {DEFAULT_VOCABULARY}"
+        ),
+    )
+    analyze.add_argument(
+        "--bars-per-line", type=int, default=BARS_PER_LINE, metavar="N",
+        help=f"bars per line in the chart (default: {BARS_PER_LINE})",
+    )
+    analyze.add_argument(
+        "-p", "--print", dest="to_stdout", action="store_true",
+        help="print the chart instead of writing a file",
+    )
 
     subparsers.add_parser("devices", help="list capture sources")
     subparsers.add_parser("formats", help="list output formats")
@@ -104,8 +152,11 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_doctor()
         if args.command == "record":
             return cmd_record(args)
+        if args.command in ("analyze", "analyse"):
+            return cmd_analyze(args)
         return cmd_tui(args)
-    except (AudioSystemError, RecorderError, ValueError) as exc:
+    except (AudioSystemError, RecorderError, AnalysisError, AnalysisUnavailable,
+            DecodeError, ValueError) as exc:
         print(f"omacap: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
@@ -190,6 +241,43 @@ def _format_for(path: Path) -> object:
         ) from exc
 
 
+def cmd_analyze(args: argparse.Namespace) -> int:
+    from .analysis.report import analyse_file
+
+    source = Path(args.file).expanduser()
+    if args.chart_format:
+        chart_format = get_chart_format(args.chart_format)
+    elif args.output:
+        chart_format = _chart_format_for(Path(args.output))
+    else:
+        chart_format = "md"
+
+    analysis = analyse_file(source, vocabulary=args.chords)
+    text = render(analysis, chart_format, args.bars_per_line)
+
+    if args.to_stdout:
+        print(text)
+        return 0
+
+    target = Path(args.output).expanduser() if args.output else default_chart_path(
+        source, chart_format
+    )
+    write_chart(analysis, target, chart_format, args.bars_per_line)
+    print(f"key     {analysis.key.name} ({analysis.key.signature})")
+    print(f"tempo   {analysis.tempo:.0f} BPM")
+    print(f"metre   {analysis.meter.name}")
+    print(f"bars    {analysis.bar_count}")
+    print(f"chart   {target}")
+    return 0
+
+
+def _chart_format_for(path: Path) -> str:
+    try:
+        return get_chart_format(path.suffix)
+    except ValueError:
+        return "md"
+
+
 def cmd_devices() -> int:
     monitors = list_monitors()
     default = None
@@ -253,6 +341,16 @@ def cmd_doctor() -> int:
     writable = _can_write(directory)
     print(f"[{'ok' if writable else 'XX'}] folder    {directory} {'is writable' if writable else 'is not writable'}")
     ok &= writable
+
+    # Optional: only needed for 'omacap analyze', so it never fails the check.
+    try:
+        from .analysis import require_numpy
+
+        version = require_numpy().__version__
+        print(f"[ok] analysis  numpy {version} - chord charts available")
+    except AnalysisUnavailable:
+        print("[--] analysis  numpy not installed - "
+              "run \"pip install 'omacap[analyze]'\" for chord charts")
 
     print("\n" + ("Everything looks good." if ok else "Some checks failed - see above."))
     return 0 if ok else 1

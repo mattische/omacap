@@ -351,3 +351,80 @@ def test_view_model_is_zeroed_when_idle(app):
 def test_home_directory_is_abbreviated():
     assert shorten_home(Path.home() / "Recordings") == "~/Recordings"
     assert shorten_home(Path("/srv/audio")) == "/srv/audio"
+
+
+# -- analysis -------------------------------------------------------------
+
+def test_analysing_before_recording_explains_itself(app):
+    press(app, "a")
+    assert app.message_kind == "error"
+    assert "Record something first" in app.message
+
+
+def test_analysis_is_offered_once_something_was_recorded(app):
+    assert app.view_model().can_analyse is False
+    press(app, " ")
+    press(app, " ")
+    assert app.last_recording is not None
+    assert app.view_model().can_analyse is True
+
+
+def test_analysing_writes_a_chart_and_reports_it(app, monkeypatch):
+    press(app, " ")
+    press(app, " ")
+
+    class FakeAnalysis:
+        key = type("K", (), {"name": "C major", "short_name": "C"})()
+        meter = type("M", (), {"name": "4/4"})()
+        tempo = 120.0
+        bar_count = 16
+
+    written = {}
+
+    def fake_analyse(path, **kwargs):
+        written["source"] = path
+        return FakeAnalysis()
+
+    def fake_write(analysis, target, chart_format, *args, **kwargs):
+        written["target"] = target
+        written["format"] = chart_format
+        return target
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", fake_analyse)
+    monkeypatch.setattr(tui, "write_chart", fake_write)
+
+    press(app, "a")
+    assert written["source"] == app.last_recording
+    assert written["target"].suffix == ".md"
+    assert app.message_kind == "success"
+    assert "C major" in app.message and "120 BPM" in app.message
+    assert any("4/4" in entry for entry in app.recordings)
+
+
+def test_an_analysis_failure_is_shown_not_raised(app, monkeypatch):
+    press(app, " ")
+    press(app, " ")
+
+    def boom(path, **kwargs):
+        raise RuntimeError("numpy is not installed")
+
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", boom)
+    press(app, "a")
+    assert app.message_kind == "error"
+    assert "numpy" in app.message
+    assert app.running is True
+
+
+def test_analysis_is_refused_while_recording(app):
+    press(app, " ")
+    press(app, "a")
+    assert app.message_kind == "error"
+    assert "Stop recording" in app.message
+
+
+def test_the_chart_format_cycles(app):
+    assert app.chart_format == "md"
+    press(app, "t")
+    assert app.chart_format == "txt"
+    press(app, "t")
+    assert app.chart_format == "md"

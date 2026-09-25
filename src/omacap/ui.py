@@ -34,6 +34,8 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("b", "cycle bitrate (lossy formats only)"),
     ("d", "cycle capture source"),
     ("n", "name the next recording"),
+    ("a", "analyse the last take into a chord chart"),
+    ("t", "chart format: markdown or plain text"),
     ("?", "toggle this help"),
     ("q", "quit"),
 )
@@ -62,6 +64,8 @@ class ViewModel:
     size_bytes: int = 0
     meter_db: float = METER_FLOOR_DB
     next_name: str | None = None
+    chart_format: str = "md"
+    can_analyse: bool = False
     recordings: list[str] = field(default_factory=list)
     message: str = ""
     message_kind: str = "info"
@@ -208,6 +212,7 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
     screen.field("Format", fmt_value, BOLD)
     screen.field("", vm.format_description, DIM)
     screen.field("Folder", vm.output_dir)
+    screen.field("Chart", f".{vm.chart_format}")
     if vm.next_name:
         screen.field("Name", vm.next_name, CYAN)
     screen.row()
@@ -241,7 +246,8 @@ def _footer_lines(vm: ViewModel) -> list[str]:
     if vm.name_prompt is not None:
         return ["typing a name · enter to accept"]
     action = "stop" if vm.state == "recording" else "record"
+    analyse = "a analyse · " if vm.can_analyse else ""
     return [
         f"space {action} · f format · b bitrate · d source",
-        "n name · ? help · q quit",
+        f"{analyse}n name · t chart · ? help · q quit",
     ]
