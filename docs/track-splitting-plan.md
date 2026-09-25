@@ -205,7 +205,18 @@ up to half a second.
 
 ### How to measure it (phase 1)
 
-Play Spotify across a track boundary and log both signals with arrival times:
+`tools/measure_mpris_offset.py` does this. Run it on the machine where the player
+runs, with a playlist playing across at least one track boundary:
+
+```bash
+python tools/measure_mpris_offset.py --duration 90
+```
+
+It pairs each track change with the nearest silence and prints the offset. It has
+been validated against mpv, where the signal arrived 50-140 ms *before* the audio;
+a streaming client buffers more, so expect a larger figure.
+
+The equivalent by hand, if you would rather see the raw streams:
 
 ```bash
 # terminal 1 — silence events, in recording time
