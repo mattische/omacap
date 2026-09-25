@@ -36,7 +36,6 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("n", "name the next recording"),
     ("a", "analyse the last take into a chord chart"),
     ("y / n", "answer the question asked after a recording"),
-    ("y / n", "answer the question after a recording"),
     ("t", "chart format: markdown or plain text"),
     ("?", "toggle this help"),
     ("q", "quit"),

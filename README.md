@@ -292,8 +292,37 @@ omacap devices     # list capture sources, with the default marked *
 omacap formats     # list output formats
 omacap doctor      # check the installation
 omacap update      # update to the latest version
-omacap nowplaying  # show what the media player says is playing
 ```
+
+### What is playing
+
+`omacap nowplaying` shows what omacap can read from your media player — which is
+what it uses to name the pieces of a split recording:
+
+```bash
+omacap nowplaying
+```
+
+```
+player   org.mpris.MediaPlayer2.spotify
+status   Playing
+artist   trampe|strandberg
+title    Jag vill vara (en del av din morgondag)
+album    det är din stund på jorden
+position 118 s of 227 s (109 s remaining)
+trackid  /com/spotify/track/5vSEGQVLbUtOUaQCNQ9WcX
+filename 01 - trampe_strandberg - Jag vill vara (en del av din morgondag)
+```
+
+`--watch` keeps running and prints a line each time the track changes, which is
+the quickest way to tell whether your player will give named files:
+
+```bash
+omacap nowplaying --watch
+```
+
+`--player NAME` picks one when several are running; the command lists the exact
+names if the one you asked for is not there.
 
 ### Options
 
@@ -535,6 +564,16 @@ Live duration, file size and peak level are read back from ffmpeg while it runs.
 Stopping sends `SIGINT`, which makes ffmpeg flush its encoder and write the
 container trailer instead of leaving a truncated file.
 
+Splitting works on one continuous recording rather than switching files mid-take,
+which would risk losing audio at every boundary. While recording, omacap collects
+two things: the gaps, reported by ffmpeg on the same channel as the peak level,
+and the track changes, read from the media player once a second. A **track change
+decides whether to cut; a gap decides where**. Pausing or seeking inside a track
+makes a gap without changing the track, so neither splits the file; a track change
+with no gap around it — crossfade, gapless — still splits, just without a gap to
+aim at. The cutting happens when the recording stops, on a file already safely on
+disk, with a stream copy so nothing is re-encoded.
+
 ## Troubleshooting
 
 **"No monitor sources found" / "pactl failed"**
@@ -552,6 +591,27 @@ The default sink changed. Restart omacap, or press `d` to pick the new monitor.
 **`ffmpeg was not found on PATH`**
 Install ffmpeg with your package manager (see [Requirements](#requirements)).
 
+**The meter says `silent` but the application is definitely playing**
+An application can be routed to an output that is not your default one, and
+omacap records the default. `pactl list sink-inputs` shows where each application
+is going; move it, or point omacap at that output with `--source`.
+
+**The pieces came out numbered instead of named**
+omacap saw fewer than two tracks. Run `omacap nowplaying --watch` while the music
+plays: if the lines do not change when the track does, the player is not
+reporting it and only the gaps are available. Splitting still works, without names.
+
+**It did not split at all, or split a track in half**
+`--min-gap` is the dial. A gap has to last that long to count as a boundary, so
+raise it if a quiet moment inside a piece is being treated as a track break, and
+lower it if a real break is being missed. `--dry-run` shows the plan without
+writing anything.
+
+**The recording is clipping**
+Lower the application's own stream volume, not the speakers — on a hardware
+output the speaker volume is applied after omacap taps the monitor, so turning it
+down changes nothing in the file. See [Interactive](#interactive).
+
 ## Development
 
 ```bash
@@ -563,9 +623,19 @@ pytest
 
 The test suite needs no sound card and no music files. Recording is tested
 against a stub `ffmpeg` on `PATH`, so process handling, progress parsing and
-shutdown behaviour are exercised for real while staying reproducible. The
-analysis is tested against synthesised audio with a known tempo, key, metre and
-chord progression, so every claim it makes is checked against ground truth.
+shutdown behaviour are exercised for real while staying reproducible; reading the
+media player is tested against a scripted `busctl`. The analysis is tested against
+synthesised audio with a known tempo, key, metre and chord progression, so every
+claim it makes is checked against ground truth.
+
+For the part that cannot be faked there is a live check, which plays a generated
+chord progression out of the sound card, records it back, drives the real
+interface, and confirms the analysis returns what was played:
+
+```bash
+python tools/live_check.py            # makes sound
+python tools/live_check.py --music song.mp3
+```
 
 ## License
 
