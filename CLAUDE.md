@@ -82,6 +82,7 @@ the relevant tests; they encode the ground truth.
 | `analysis/features.py` | `RESOLUTION_KNEE = 2.5` | A semitone needs about this many FFT bins across it before its neighbours separate. At C2 there are only 1.4, so each band is weighted by how well it is resolved rather than the low end being cut off. A hard cutoff at C3 was tried too and was worse; the taper is also stable for a knee anywhere from 2 to 3. |
 | `analysis/chords.py` | `CHANGE_PENALTY = 0.25`, `SAME_ROOT_FRACTION = 0.3` | Harmonic rhythm is slower than the beat. Agreement is flat from 0.20 to 0.30 and a progression that genuinely changes every beat survives to 0.30, so the middle is taken. Changing quality on the same root costs a fraction, or the decoder refuses to hear a suspension resolve. |
 | `analysis/meter.py` | `CUE_WEIGHTS = (0.3, 0.4, 0.3)` | Accent, harmonic change, kick band. The kick shares the work rather than replacing anything; adding it took one recording's metre confidence from 0.05 to 1.00 without unseating any time signature that was already right. |
+| `analysis/report.py` | `UNCERTAIN_FRACTION = 0.8` | A bar matching this much worse than the song's median gets a `?`. Relative rather than a fixed percentile, so a song the analysis handled well is marked nowhere. Measured: marks ~14% of bars and catches ~57% of the disagreements with a real chart, against 14% for picking at random. |
 | `analysis/rhythm.py` | `STRAIGHT_BELOW = 0.56`, `SWUNG_BELOW = 0.72` | Where the off-beat sits. Straight reads 0.51 where 0.50 was played and triplet swing reads 0.67 where 0.667 was played, so the bands sit clear of both. |
 | `analysis/key.py` | `KEY_BONUS = 0.05` | A second decoding pass favours chords that belong to the detected key. 0.04-0.08 all gave the same gain, so the middle was taken. |
 | `analysis/features.py` | `sigma_semitones = 0.3` | 0.6 leaked into neighbouring pitch classes badly (a lone A4 scored A, G#, A# nearly equally). 0.2 is too narrow for real, slightly detuned instruments. |
@@ -147,6 +148,13 @@ in how the audio or the maths works is more likely to be fitting the charts'
 quirks than hearing the music better.
 
 ## Ideas that were tried and did not help
+
+**Letting the user pin a key they already know.** The thought was that someone who
+knows their own song could correct the key and have the chords improve with it.
+Measured: forcing the right key changes the chords not at all. A key and its
+relative share their diatonic set, so the prior the second pass uses is the same
+either way, and where the key was already right there was nothing to fix. The
+override would only change a label.
 
 **A bass chroma to settle the relative-key question.** The idea was that the
 lowest register would say which of a relative pair is home. It does not survive

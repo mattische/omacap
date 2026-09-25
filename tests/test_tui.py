@@ -426,11 +426,16 @@ def test_analysis_is_refused_while_recording(app):
 
 
 def test_the_chart_format_cycles(app):
-    assert app.chart_format == "md"
+    from omacap.chart import CHART_FORMATS
+
+    assert app.chart_format == CHART_FORMATS[0]
+    seen = [app.chart_format]
+    for _ in range(len(CHART_FORMATS) - 1):
+        press(app, "t")
+        seen.append(app.chart_format)
+    assert seen == list(CHART_FORMATS)
     press(app, "t")
-    assert app.chart_format == "txt"
-    press(app, "t")
-    assert app.chart_format == "md"
+    assert app.chart_format == CHART_FORMATS[0], "it should wrap round"
 
 
 # -- ffmpeg capability handling -------------------------------------------

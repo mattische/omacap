@@ -484,7 +484,7 @@ In the interactive interface, press **a** after a take to do the same thing, and
 | Option | Meaning |
 | --- | --- |
 | `-o, --output` | chart file to write; only for a single input (default: beside each recording) |
-| `-t, --chart-format` | `md` or `txt` (default: `md`, or taken from `--output`) |
+| `-t, --chart-format` | `md`, `txt` or `chordgrid` (default: `md`, or taken from `--output`) |
 | `-c, --chords` | vocabulary: `simple`, `standard` (default) or `full` |
 | `--bars-per-line` | bars per line in the grid (default: 4) |
 | `-p, --print` | print the chart instead of writing a file |
@@ -499,6 +499,45 @@ The chord vocabulary is the setting worth knowing about:
 
 A narrower vocabulary means fewer chords to second-guess. `simple` often turns a
 busy chart into an obvious four-bar loop.
+
+### Bars worth a second listen
+
+A `?` marks a bar the audio matched less well than the rest of the song:
+
+```
+ 9 | D      | C      | Em?    | D      |
+```
+
+It is not decoration. Against three recordings whose players wrote their own
+charts, the bars marked this way are about a seventh of the total and contain over
+half of the places the analysis disagreed with the chart — four times what picking
+bars at random would manage. If you are going to check the chart against your ears,
+these are the bars to start with.
+
+### Writing into Obsidian
+
+`--chart-format chordgrid` writes the chart as a `chordgrid` block, which Obsidian
+renders as a chart rather than as text:
+
+````bash
+omacap analyze take.flac -t chordgrid
+````
+
+````markdown
+```chordgrid
+measure-num
+
+4/4
+
+| C | Em | D | D |
+| C | Em | D | D |
+```
+````
+
+The file is still Markdown, with the same summary above it — it just puts the grid
+in the form a chart plugin understands, so it can sit beside charts written by hand
+instead of having to be copied across. `grid` and `obsidian` are accepted as names
+for it too.
 
 ### What it can and cannot do
 

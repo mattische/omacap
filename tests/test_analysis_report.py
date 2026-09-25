@@ -218,3 +218,65 @@ def _write_wav(path: Path, samples: np.ndarray) -> None:
         handle.setsampwidth(2)
         handle.setframerate(SR)
         handle.writeframes(pcm.tobytes())
+
+
+# -- which bars are worth a second listen ----------------------------------
+
+def test_a_bar_carries_how_well_it_matched(analysis):
+    assert all(bar.strength > 0 for bar in analysis.bars)
+    assert all(0.0 <= bar.strength <= 1.0 for bar in analysis.bars)
+
+
+def test_bar_strength_averages_the_spans_inside_it():
+    from omacap.analysis.report import bar_strength
+
+    spans = [span("C", 0.0, 1.0), span("C", 1.0, 2.0)]
+    spans[0] = ChordSpan("C", 0.0, 1.0, 0, "", 0.8)
+    spans[1] = ChordSpan("C", 1.0, 2.0, 0, "", 0.4)
+    assert bar_strength(spans, 0.0, 2.0) == pytest.approx(0.6)
+
+
+def test_a_bar_with_nothing_in_it_scores_zero():
+    from omacap.analysis.report import bar_strength
+
+    assert bar_strength([], 0.0, 2.0) == 0.0
+
+
+def test_an_evenly_matched_song_marks_nothing():
+    """The mark is relative, so a song the analysis handled well gets no marks."""
+    from omacap.analysis.report import Analysis, Bar
+    from omacap.analysis.key import Key
+    from omacap.analysis.meter import Meter
+
+    bars = [Bar(number=i + 1, start=i, end=i + 1, chords=["C"], strength=0.8)
+            for i in range(16)]
+    result = Analysis(source=Path("x.wav"), duration=16.0, tempo=120.0,
+                      meter=Meter(4, 0, "4/4", 1.0), key=Key(0, "major", 0.9, 0.9),
+                      bars=bars, chords=[], beat_count=64, tempo_confidence=1.0)
+    assert result.uncertain_bars == set()
+
+
+def test_the_weakest_bars_are_marked():
+    from omacap.analysis.report import Analysis, Bar
+    from omacap.analysis.key import Key
+    from omacap.analysis.meter import Meter
+
+    strengths = [0.8] * 14 + [0.2, 0.25]
+    bars = [Bar(number=i + 1, start=i, end=i + 1, chords=["C"], strength=s)
+            for i, s in enumerate(strengths)]
+    result = Analysis(source=Path("x.wav"), duration=16.0, tempo=120.0,
+                      meter=Meter(4, 0, "4/4", 1.0), key=Key(0, "major", 0.9, 0.9),
+                      bars=bars, chords=[], beat_count=64, tempo_confidence=1.0)
+    assert result.uncertain_bars == {15, 16}
+
+
+def test_too_few_bars_to_judge_marks_nothing():
+    from omacap.analysis.report import Analysis, Bar
+    from omacap.analysis.key import Key
+    from omacap.analysis.meter import Meter
+
+    bars = [Bar(number=1, start=0, end=1, chords=["C"], strength=0.1)]
+    result = Analysis(source=Path("x.wav"), duration=1.0, tempo=120.0,
+                      meter=Meter(4, 0, "4/4", 1.0), key=Key(0, "major", 0.9, 0.9),
+                      bars=bars, chords=[], beat_count=4, tempo_confidence=1.0)
+    assert result.uncertain_bars == set()

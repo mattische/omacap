@@ -159,9 +159,12 @@ def test_text_lists_the_facts(analysis):
 
 @pytest.mark.parametrize("chart_format", CHART_FORMATS)
 def test_render_dispatches_on_format(analysis, chart_format):
-    assert render(analysis, chart_format) == (
-        render_markdown(analysis) if chart_format == "md" else render_text(analysis)
-    )
+    expected = {
+        "md": lambda: render_markdown(analysis),
+        "txt": lambda: render_text(analysis),
+        "chordgrid": lambda: render_markdown(analysis, grid=True),
+    }[chart_format]
+    assert render(analysis, chart_format) == expected()
 
 
 def test_writing_creates_the_file_and_any_folders(analysis, tmp_path):
@@ -226,3 +229,84 @@ def test_the_threshold_is_where_the_wording_of_confidence_changes():
 
     assert confidence_word(CERTAIN) == "high"
     assert confidence_word(CERTAIN - 0.01) != "high"
+
+
+# -- marking the bars worth checking --------------------------------------
+
+def test_an_uncertain_bar_is_marked(analysis):
+    from omacap.chart import UNCERTAIN_MARK, bar_text
+
+    bar = analysis.bars[0]
+    assert bar_text(bar, set()) == bar.label
+    assert bar_text(bar, {bar.number}) == bar.label + UNCERTAIN_MARK
+
+
+def test_the_grid_marks_them_and_says_what_it_means(analysis, monkeypatch):
+    marked = {bar.number for bar in analysis.bars[:2]}
+    monkeypatch.setattr(type(analysis), "uncertain_bars", property(lambda self: marked))
+    grid = "\n".join(chart_lines(analysis))
+    assert "?" in grid
+    assert "second listen" in render_markdown(analysis)
+
+
+def test_nothing_is_said_when_nothing_is_marked(analysis, monkeypatch):
+    monkeypatch.setattr(type(analysis), "uncertain_bars", property(lambda self: set()))
+    assert "second listen" not in render_markdown(analysis)
+    assert "?" not in "\n".join(chart_lines(analysis))
+
+
+def test_the_columns_still_line_up_with_marks(analysis, monkeypatch):
+    marked = {bar.number for bar in analysis.bars[::3]}
+    monkeypatch.setattr(type(analysis), "uncertain_bars", property(lambda self: marked))
+    lines = chart_lines(analysis)
+    assert len({len(line) for line in lines}) == 1
+
+
+# -- the chordgrid format --------------------------------------------------
+
+@pytest.mark.parametrize("given", ["chordgrid", "grid", "obsidian", "OBSIDIAN"])
+def test_the_chordgrid_aliases(given):
+    assert get_chart_format(given) == "chordgrid"
+
+
+def test_a_chordgrid_block_is_written(analysis):
+    from omacap.chart import chordgrid_lines
+
+    lines = chordgrid_lines(analysis)
+    assert lines[0] == "```chordgrid"
+    assert lines[-1] == "```"
+    assert analysis.meter.name in lines
+
+
+def test_chordgrid_bars_are_written_between_pipes(analysis):
+    from omacap.chart import chordgrid_lines
+
+    rows = [l for l in chordgrid_lines(analysis) if l.startswith("| ")]
+    assert rows, "expected some bar rows"
+    for row in rows:
+        assert row.startswith("| ") and row.endswith(" |")
+    assert rows[0].count("|") == 5          # four bars a line
+
+
+def test_chordgrid_renders_through_the_dispatcher(analysis):
+    text = render(analysis, "chordgrid")
+    assert "```chordgrid" in text
+    assert text.startswith("# ")            # still a markdown document
+
+
+def test_a_chordgrid_chart_is_written_as_markdown(analysis, tmp_path):
+    assert default_chart_path(Path("/tmp/take.mp3"), "chordgrid") == Path("/tmp/take.md")
+    target = write_chart(analysis, tmp_path / "chart.md", "chordgrid")
+    assert "```chordgrid" in target.read_text(encoding="utf-8")
+
+
+def test_a_song_with_no_bars_still_makes_a_block():
+    from omacap.chart import chordgrid_lines
+
+    class Empty:
+        bars: list = []
+        class meter:
+            name = "4/4"
+
+    lines = chordgrid_lines(Empty())
+    assert lines[0] == "```chordgrid" and lines[-1] == "```"

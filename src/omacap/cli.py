@@ -260,8 +260,9 @@ def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
     """Options shared by ``analyze`` and by ``record --analyze``."""
     parser.add_argument(
         "-t", "--chart-format", default=None, metavar="FMT",
-        choices=("md", "txt", "markdown", "text"),
-        help="chart format: md or txt (default: md, or taken from --output)",
+        choices=("md", "txt", "markdown", "text", "chordgrid", "grid", "obsidian"),
+        help="chart format: md, txt, or chordgrid for a block Obsidian renders "
+             "(default: md, or taken from --output)",
     )
     parser.add_argument(
         "-c", "--chords", default=DEFAULT_VOCABULARY, metavar="SET",

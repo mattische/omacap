@@ -7,19 +7,21 @@ from pathlib import Path
 #: Bars per line. Four is how lead sheets are normally laid out.
 BARS_PER_LINE = 4
 
-CHART_FORMATS = ("md", "txt")
+CHART_FORMATS = ("md", "txt", "chordgrid")
 DEFAULT_CHART_FORMAT = "md"
 
-CHART_EXTENSIONS = {"md": ".md", "txt": ".txt"}
+CHART_EXTENSIONS = {"md": ".md", "txt": ".txt", "chordgrid": ".md"}
 
 
 def get_chart_format(name: str) -> str:
-    """Normalise a chart format name, accepting a leading dot and 'markdown'."""
+    """Normalise a chart format name, accepting a leading dot and some aliases."""
     key = name.strip().lower().lstrip(".")
     if key in ("markdown", "mkd"):
         key = "md"
     elif key == "text":
         key = "txt"
+    elif key in ("grid", "obsidian"):
+        key = "chordgrid"
     if key not in CHART_FORMATS:
         raise ValueError(
             f"unknown chart format {name!r}; choose one of: {', '.join(CHART_FORMATS)}"
@@ -45,21 +47,51 @@ def confidence_word(value: float) -> str:
     return "low"
 
 
+#: Appended to a bar the analysis was less sure of.
+UNCERTAIN_MARK = "?"
+
+
+def bar_text(bar, uncertain: set[int]) -> str:
+    """A bar's chords, marked when the match was weaker than the song's usual."""
+    return bar.label + (UNCERTAIN_MARK if bar.number in uncertain else "")
+
+
 def chart_lines(analysis, bars_per_line: int = BARS_PER_LINE) -> list[str]:
     """The chart grid: bar numbers down the left, chords across."""
     bars = analysis.bars
     if not bars:
         return ["(no bars were detected)"]
 
-    width = max((len(bar.label) for bar in bars), default=4)
-    width = max(width, 6)
+    uncertain = getattr(analysis, "uncertain_bars", set())
+    texts = {bar.number: bar_text(bar, uncertain) for bar in bars}
+    width = max(max((len(t) for t in texts.values()), default=4), 6)
     number_width = len(str(len(bars)))
 
     lines = []
     for start in range(0, len(bars), bars_per_line):
         row = bars[start: start + bars_per_line]
-        cells = "".join(f" {bar.label.ljust(width)} |" for bar in row)
+        cells = "".join(f" {texts[bar.number].ljust(width)} |" for bar in row)
         lines.append(f"{str(row[0].number).rjust(number_width)} |{cells}")
+    return lines
+
+
+def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE) -> list[str]:
+    """The chart as a chordgrid block, which Obsidian renders as a chart.
+
+    The format a working musician's notes are already in: a time signature, then
+    bars between pipes. Writing this means omacap's output can sit beside charts
+    written by hand instead of having to be copied across.
+    """
+    bars = analysis.bars
+    if not bars:
+        return ["```chordgrid", "4/4", "```"]
+
+    uncertain = getattr(analysis, "uncertain_bars", set())
+    lines = ["```chordgrid", "measure-num", "", analysis.meter.name, ""]
+    for start in range(0, len(bars), bars_per_line):
+        row = bars[start: start + bars_per_line]
+        lines.append("| " + " | ".join(bar_text(bar, uncertain) for bar in row) + " |")
+    lines.append("```")
     return lines
 
 
@@ -111,7 +143,8 @@ FOOTER = (
 )
 
 
-def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE) -> str:
+def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
+                    grid: bool = False) -> str:
     """A Markdown chart, with the grid kept in a code block so it stays aligned."""
     rows = summary_rows(analysis)
     lines = [f"# {analysis.source.stem}", "", "| | |", "| --- | --- |"]
@@ -119,9 +152,17 @@ def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE) -> str:
         lines.append(f"| **{label}** | {value} |")
     lines += ["", "## Chart", ""]
     lines.append(f"Bars read left to right, {bars_per_line} per line.")
-    lines += ["", "```"]
-    lines += chart_lines(analysis, bars_per_line)
-    lines += ["```", "", "---", "", FOOTER, ""]
+    if getattr(analysis, "uncertain_bars", set()):
+        lines.append(
+            f"A `{UNCERTAIN_MARK}` marks a bar the audio matched less well than "
+            f"the rest of the song - worth a second listen."
+        )
+    lines.append("")
+    if grid:
+        lines += chordgrid_lines(analysis, bars_per_line)
+    else:
+        lines += ["```"] + chart_lines(analysis, bars_per_line) + ["```"]
+    lines += ["", "---", "", FOOTER, ""]
     return "\n".join(lines)
 
 
@@ -141,9 +182,10 @@ def render_text(analysis, bars_per_line: int = BARS_PER_LINE) -> str:
 
 def render(analysis, chart_format: str = DEFAULT_CHART_FORMAT, bars_per_line: int = BARS_PER_LINE) -> str:
     """Render in the requested format."""
-    if get_chart_format(chart_format) == "txt":
+    wanted = get_chart_format(chart_format)
+    if wanted == "txt":
         return render_text(analysis, bars_per_line)
-    return render_markdown(analysis, bars_per_line)
+    return render_markdown(analysis, bars_per_line, grid=wanted == "chordgrid")
 
 
 def write_chart(
