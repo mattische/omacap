@@ -509,7 +509,9 @@ def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
         lines += chordgrid_lines(analysis, bars_per_line, collapse, sections)
     else:
         lines += ["```"] + chart_lines(analysis, bars_per_line, collapse) + ["```"]
-    lines += ["", "---", "", FOOTER, ""]
+    # A rule written "***" rather than "---", so a file that already uses "---"
+    # for its frontmatter does not appear to have two of them.
+    lines += ["", "***", "", FOOTER, ""]
     return "\n".join(lines)
 
 

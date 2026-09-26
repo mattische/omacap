@@ -566,3 +566,12 @@ def test_the_plain_grid_is_still_available(analysis):
     text = render(analysis, "md")
     assert "```chordgrid" not in text
     assert "| C" in text
+
+
+def test_only_the_frontmatter_uses_a_triple_dash(analysis):
+    """Two `---` fences and a third for a rule reads as duplicated frontmatter."""
+    lines = render(analysis, "md").splitlines()
+    fences = [n for n, line in enumerate(lines) if line.strip() == "---"]
+    assert len(fences) == 2, "exactly the frontmatter, opened and closed"
+    assert fences[0] == 0, "and at the very top, or Obsidian will not read it"
+    assert "***" in lines          # the rule above the footer instead

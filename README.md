@@ -483,7 +483,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.10.1"
+omacap: "0.10.2"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -586,7 +586,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.10.1"
+omacap: "0.10.2"
 ---
 ````
 
