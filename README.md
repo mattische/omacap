@@ -517,7 +517,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.15.0"
+omacap: "0.16.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -626,7 +626,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.15.0"
+omacap: "0.16.0"
 ---
 ````
 
@@ -837,8 +837,15 @@ melody, speech or heavy distortion.
 exact on 12 of 12 click tracks from 60 to 200 BPM, time signature right on 11 of
 12 (the miss is fast 3/4, which correctly reports low confidence), chords 93% per
 bar. Against three real band recordings whose players wrote their own chord
-charts: **92% of bars on average carry a chord the chart uses** (86–95% across the
+charts: **91% of bars on average carry a chord the chart uses** (84–95% across the
 three), and the time signature and the key were right for all three.
+
+Read that figure carefully, because it is weaker than it looks: it asks whether the
+bar's chord appears *somewhere* in that song's chart, not whether it is the right
+chord in that bar. The measure that checks the order is the longest stretch
+reproducing a known repeating figure exactly, which is **24, 8 and 48 bars** on the
+three. Bar lines land within 30 ms of the truth 95% of the time on material where
+the truth is known exactly.
 
 Those figures are a floor rather than a ceiling, because the charts they are
 scored against were written by the people who played the songs and are not

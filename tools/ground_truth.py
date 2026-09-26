@@ -255,7 +255,9 @@ def render(song: Song):
     tail = int(0.09 * SAMPLE_RATE)
     impulse = np.exp(-np.arange(tail) / (tail / 3.5)) * rng.standard_normal(tail) * 0.06
     impulse[0] = 1.0
-    audio = np.convolve(audio, impulse, mode="same")
+    # Causal: "same" centres the output and would slide the whole rendering ~45 ms
+    # later than the truth written above it, which reads as omacap being early.
+    audio = np.convolve(audio, impulse)[:audio.size]
 
     peak = np.abs(audio).max()
     if peak > 0:

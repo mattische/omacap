@@ -141,3 +141,53 @@ def _clicks(bpm: float, duration: float) -> np.ndarray:
         index = int(start * SR)
         signal[index: index + length] += click
     return signal
+
+
+# -- the onset envelope's lead --------------------------------------------
+
+def test_the_onset_envelope_is_put_back_where_the_sound_is():
+    """The envelope leads the event it describes, by a constant.
+
+    The transform window is 93 ms and centred, so a transient already raises
+    energy in frames centred before it, and the flux peaks ahead of the attack.
+    Uncorrected, every beat, bar and cut omacap reports is early by that much.
+    """
+    import numpy as np
+
+    from omacap.analysis.features import HOP_LENGTH, onset_strengths
+
+    rate = 22050
+    when = 2.0
+    samples = np.zeros(int(5 * rate))
+    start = int(when * rate)
+    length = 400
+    click = (np.exp(-np.arange(length) / 60)
+             * np.sin(2 * np.pi * 900 * np.arange(length) / rate))
+    samples[start:start + length] = click
+
+    envelope, _ = onset_strengths(samples, rate)
+    peak = float(np.argmax(envelope)) / (rate / HOP_LENGTH)
+    # Within one hop of the truth, rather than a hop and a half early.
+    assert abs(peak - when) < HOP_LENGTH / rate, f"{1000 * (peak - when):.0f} ms out"
+
+
+def test_the_correction_is_a_constant_not_a_tuning_knob():
+    from omacap.analysis.features import HOP_LENGTH, ONSET_LEAD
+
+    # Measured at -27 ms on isolated clicks and -31 ms on real bar lines; it has
+    # to be a little over one hop for either of those to be met.
+    assert 0.015 < ONSET_LEAD < 0.045
+    assert ONSET_LEAD > HOP_LENGTH / 22050 * 0.5
+
+
+def test_shifting_does_not_change_how_long_the_envelope_is():
+    """Everything downstream indexes it by time, so its length must not move."""
+    import numpy as np
+
+    from omacap.analysis.features import onset_strengths, stft_magnitude
+
+    rate = 22050
+    samples = np.random.default_rng(3).standard_normal(rate * 3) * 0.1
+    envelope, low = onset_strengths(samples, rate)
+    assert envelope.size == low.size
+    assert envelope.size == stft_magnitude(samples, 2048, 512).shape[1]

@@ -38,6 +38,16 @@ FLAT_NAMES = ("C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B")
 #: and sits below where the harmony carries, so it is a cue the chroma cannot give.
 LOW_BAND_HZ = (40.0, 120.0)
 
+#: How far the onset envelope *leads* the sound it describes, in seconds.
+#:
+#: The transform window is 93 ms and centred, so a transient at t already raises
+#: energy in frames centred from t-46 ms, and the flux peaks before the attack
+#: rather than on it. Measured on isolated clicks at six positions: -27 ms, and
+#: independently across eleven arrangements' bar lines at -31 ms. Uncorrected,
+#: every beat, bar and cut omacap reports is early by that much - a constant, not
+#: noise: the scatter around it is 12 ms.
+ONSET_LEAD = 0.027
+
 
 @dataclass
 class Spectral:
@@ -182,10 +192,16 @@ def onset_strengths(
     )
     window = int(round(sample_rate / hop_length))
 
+    delay = int(round(ONSET_LEAD * sample_rate / hop_length))
+
     def finish(rows):
         envelope = rows.sum(axis=0)
         # Subtract a local median so a loud section does not dominate a quiet one.
         envelope = np.maximum(envelope - _moving_median(envelope, window), 0.0)
+        if delay:
+            # The envelope leads the event it describes; put it back where the
+            # sound is. See ONSET_LEAD.
+            envelope = np.concatenate([np.zeros(delay), envelope[:-delay]])
         peak = envelope.max()
         return envelope / peak if peak > 0 else envelope
 
