@@ -396,3 +396,71 @@ def test_the_advice_names_the_thing_to_change():
     advice = clipping_advice()
     assert "sink-input-volume" in advice
     assert "speakers" in advice        # says plainly what will not help
+
+
+# -- tags ------------------------------------------------------------------
+
+def test_metadata_args_are_written_at_both_levels():
+    """MP3 and MP4 read container tags; Ogg and Opus only read stream tags.
+
+    Measured on all six formats omacap writes: the Ogg pair came back with
+    nothing at all until the stream-level arguments were added, and ffmpeg exited
+    0 the whole time.
+    """
+    from omacap.recorder import metadata_args
+
+    args = metadata_args({"title": "Reser bort", "artist": "Trampe"})
+    assert args.count("-metadata") == 2
+    assert args.count("-metadata:s:a:0") == 2
+    assert "title=Reser bort" in args and "artist=Trampe" in args
+
+
+def test_metadata_args_keep_a_stable_order():
+    from omacap.recorder import metadata_args
+
+    args = metadata_args({"track": "3", "artist": "B", "title": "A", "album": "C"})
+    values = [a for a in args if "=" in a]
+    assert values[0].startswith("title=")
+    assert values[-1].startswith("track=")
+
+
+def test_no_tags_means_no_arguments():
+    from omacap.recorder import metadata_args
+
+    assert metadata_args(None) == []
+    assert metadata_args({}) == []
+    assert metadata_args({"title": ""}) == []
+
+
+def test_tagging_a_missing_file_is_refused_quietly():
+    from omacap.recorder import write_tags
+
+    assert write_tags(Path("/nowhere/at/all.mp3"), {"title": "x"}) is False
+
+
+def test_tagging_with_nothing_to_write_does_nothing():
+    from omacap.recorder import write_tags
+
+    assert write_tags(Path("/nowhere/at/all.mp3"), {}) is False
+
+
+def test_a_track_becomes_the_tags_a_file_carries():
+    from omacap.nowplaying import Track
+
+    track = Track(trackid="/t/1", title="Reser bort", artist="Trampe",
+                  album="Jämshög", track_number=5)
+    assert track.tags == {"title": "Reser bort", "artist": "Trampe",
+                          "album": "Jämshög", "track": "5"}
+
+
+def test_a_track_with_nothing_known_has_no_tags():
+    from omacap.nowplaying import Track
+
+    assert Track(trackid="/t/1").tags == {}
+
+
+def test_a_track_without_a_number_leaves_it_out():
+    from omacap.nowplaying import Track
+
+    tags = Track(trackid="/t/1", title="One", artist="A").tags
+    assert "track" not in tags

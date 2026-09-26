@@ -75,6 +75,19 @@ class Track:
         return self.title or self.trackid or "unknown"
 
     @property
+    def tags(self) -> dict:
+        """What the player knows, as tags to write into the file.
+
+        A filename is a poor place to keep this: cliamp reads "01 - artist - title"
+        as artist "01", a music server sorts by whatever it can parse, and every
+        tool guesses differently. Tags are read the same way by all of them.
+        """
+        fields = {"title": self.title, "artist": self.artist, "album": self.album}
+        if self.track_number:
+            fields["track"] = str(self.track_number)
+        return {name: value for name, value in fields.items() if value}
+
+    @property
     def basename(self) -> str:
         """What to call a file holding just this track, with no number."""
         parts = [self.artist] if self.artist else []

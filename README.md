@@ -299,6 +299,22 @@ saved   /home/you/Recordings/omacap/trampe|strandberg - Reser bort, kommer hem.m
 named   after trampe|strandberg – Reser bort, kommer hem
 ```
 
+The same information is written **into the file as tags** — title, artist, album
+and track number — which matters more than the name. A filename is read
+differently by every tool: `cliamp` reads `01 - artist - title` as an artist
+called "01". Tags are read the same way by all of them, and they survive the file
+being renamed or moved.
+
+Measured against `cliamp` and all six output formats: tags are written and read
+back correctly in every one, and read by cliamp in **mp3, flac, m4a, opus and
+ogg**. WAV is the exception — its tags go in a RIFF INFO chunk that many tools
+ignore, cliamp among them — so for anything that will live in a library, record to
+flac or mp3 rather than wav. Tagging is a stream copy, so nothing is re-encoded
+and the duration does not change.
+
+Pieces from `--split` are tagged as they are cut, with their place in the capture
+as the track number.
+
 This works for a part of a song as much as a whole one — it is the track the
 player says is loaded, not a guess from the audio. Several tracks in one take are
 left with the timestamp, because a single file named after one of them would be
@@ -501,7 +517,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.13.0"
+omacap: "0.14.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -610,7 +626,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.13.0"
+omacap: "0.14.0"
 ---
 ````
 

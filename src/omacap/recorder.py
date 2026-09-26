@@ -43,6 +43,9 @@ _ERROR_RE = re.compile(
 #: Quietest level the meter will show; anything below reads as silence.
 METER_FLOOR_DB = -60.0
 
+#: Writing tags is a stream copy, so it is quick; this is only a backstop.
+TAG_TIMEOUT = 60.0
+
 #: A peak at or above this has run out of headroom. Samples here are sitting at
 #: the top of the scale, which is where a digital recording starts to distort.
 CLIP_THRESHOLD_DB = -0.1
@@ -199,6 +202,88 @@ def build_output_path(
         candidate = directory / f"{stem}_{counter}{audio_format.extension}"
         counter += 1
     return candidate
+
+
+#: The tags omacap writes, in the order it writes them.
+TAG_NAMES = ("title", "artist", "album", "track")
+
+
+def metadata_args(tags: dict | None) -> list[str]:
+    """ffmpeg arguments writing these tags, in a stable order.
+
+    Written at both container and stream level, because the two families differ:
+    MP3, MP4, FLAC and WAV take container metadata, while Ogg and Opus keep Vorbis
+    comments on the stream and silently ignore the container form. Measured on all
+    six formats omacap writes - the Ogg pair came back with nothing at all until
+    the stream-level arguments were added.
+    """
+    if not tags:
+        return []
+    args: list[str] = []
+    for name in TAG_NAMES:
+        value = tags.get(name)
+        if value:
+            args += ["-metadata", f"{name}={value}",
+                     "-metadata:s:a:0", f"{name}={value}"]
+    return args
+
+
+def read_tags(path: Path) -> dict:
+    """The tags a file actually carries, container or stream, or {} if unreadable."""
+    fields = ",".join(TAG_NAMES)
+    command = [
+        "ffprobe", "-v", "error", "-show_entries",
+        f"format_tags={fields}:stream_tags={fields}",
+        "-of", "default=nw=1", str(path),
+    ]
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True,
+                              timeout=TAG_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    found = {}
+    for line in (proc.stdout or "").splitlines():
+        if line.startswith("TAG:") and "=" in line:
+            name, _, value = line[4:].partition("=")
+            if value and name.lower() in TAG_NAMES:
+                found.setdefault(name.lower(), value)
+    return found
+
+
+def write_tags(path: Path, tags: dict | None) -> bool:
+    """Put these tags into a finished recording, without re-encoding it.
+
+    A second pass rather than tags on the original command, because what the
+    player was playing is not reliably known when recording starts - omacap is
+    often opened first and play pressed after.
+
+    Returns whether anything was written. A failure is not raised: an untagged
+    recording is worth more than no recording.
+    """
+    args = metadata_args(tags)
+    if not args or not path.is_file():
+        return False
+    ensure_ffmpeg()
+    temporary = path.with_name(f".{path.stem}.tagging{path.suffix}")
+    command = [
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
+        "-i", str(path), "-map", "0", "-c", "copy", *args, "-y", str(temporary),
+    ]
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True,
+                              timeout=TAG_TIMEOUT)
+        if proc.returncode != 0 or not temporary.is_file() \
+                or temporary.stat().st_size == 0:
+            temporary.unlink(missing_ok=True)
+            return False
+        temporary.replace(path)
+        # Report what landed, not what was asked for. ffmpeg exits 0 while writing
+        # no tags at all if the arguments are the wrong shape for the container,
+        # which is how the Ogg formats were failing without saying so.
+        return read_tags(path).get("title") == tags.get("title")
+    except (OSError, subprocess.TimeoutExpired):
+        temporary.unlink(missing_ok=True)
+        return False
 
 
 def rename_recording(path: Path, basename: str) -> Path:

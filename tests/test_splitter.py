@@ -217,3 +217,60 @@ def test_an_unknown_format_cannot_be_split(tmp_path):
 
 def test_nothing_to_split_writes_nothing(playlist, tmp_path):
     assert split(playlist, [], tmp_path) == []
+
+
+def test_a_split_piece_carries_the_track_s_tags(tmp_path, monkeypatch):
+    """The player already said what the piece is; the file should say it too."""
+    import subprocess
+
+    from omacap import splitter
+    from omacap.nowplaying import Track
+    from omacap.timeline import Segment
+
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        Path(command[-1]).write_bytes(b"x" * 4096)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(splitter.subprocess, "run", fake_run)
+    monkeypatch.setattr(splitter, "_written_duration", lambda path: 30.0)
+    monkeypatch.setattr(splitter, "ensure_ffmpeg", lambda: None)
+
+    track = Track(trackid="/t/1", title="Reser bort", artist="Trampe")
+    segment = Segment(index=3, start=0.0, end=30.0, track=track)
+    source = tmp_path / "take.mp3"
+    source.write_bytes(b"x")
+    splitter.cut(source, segment, tmp_path / "out.mp3", get_format("mp3"))
+
+    command = seen["command"]
+    assert "title=Reser bort" in command
+    assert "artist=Trampe" in command
+    # Its place in the capture, when the player did not say which track it is.
+    assert "track=3" in command
+
+
+def test_an_unnamed_piece_is_still_numbered(tmp_path, monkeypatch):
+    import subprocess
+
+    from omacap import splitter
+    from omacap.timeline import Segment
+
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        Path(command[-1]).write_bytes(b"x" * 4096)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(splitter.subprocess, "run", fake_run)
+    monkeypatch.setattr(splitter, "_written_duration", lambda path: 30.0)
+    monkeypatch.setattr(splitter, "ensure_ffmpeg", lambda: None)
+
+    source = tmp_path / "take.mp3"
+    source.write_bytes(b"x")
+    splitter.cut(source, Segment(index=2, start=0.0, end=30.0),
+                 tmp_path / "out.mp3", get_format("mp3"))
+    assert "track=2" in seen["command"]
+    assert not any(a.startswith("title=") for a in seen["command"])

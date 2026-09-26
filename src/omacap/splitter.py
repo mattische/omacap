@@ -6,7 +6,12 @@ import subprocess
 from pathlib import Path
 
 from .formats import AudioFormat, get_format
-from .recorder import RecorderError, ensure_ffmpeg, sanitize_basename
+from .recorder import (
+    RecorderError,
+    ensure_ffmpeg,
+    metadata_args,
+    sanitize_basename,
+)
 from .timeline import Segment, Silence, parse_silence_line, silences_from_events
 
 #: Level below which audio counts as a gap. Measured against Spotify through a
@@ -115,10 +120,14 @@ def cut(source: Path, segment: Segment, target: Path, audio_format: AudioFormat)
         if audio_format.name in _REENCODE
         else ["-c", "copy"]
     )
+    # The player already told us what this piece is; writing it in costs nothing
+    # here and saves every tool downstream from guessing at the filename.
+    tags = dict(segment.track.tags) if segment.track else {}
+    tags.setdefault("track", str(segment.index))
     command = [
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
         "-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}",
-        "-i", str(source), *codec, "-y", str(target),
+        "-i", str(source), *codec, *metadata_args(tags), "-y", str(target),
     ]
     try:
         proc = subprocess.run(command, capture_output=True, text=True,

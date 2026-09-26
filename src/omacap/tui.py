@@ -32,6 +32,7 @@ from .recorder import (
     RecorderError,
     build_output_path,
     rename_recording,
+    write_tags,
     default_output_dir,
     ensure_ffmpeg,
     sanitize_basename,
@@ -207,10 +208,12 @@ class TuiApp:
 
         # Name the file after the track when the player reported just one, unless
         # a name was typed for it. See cmd_record.
-        if only_track is not None and not self.next_name and not recorder.error:
-            renamed = rename_recording(result.path, only_track.basename)
-            if renamed != result.path:
-                result = replace(result, path=renamed)
+        if only_track is not None and not recorder.error:
+            write_tags(result.path, only_track.tags)
+            if not self.next_name:
+                renamed = rename_recording(result.path, only_track.basename)
+                if renamed != result.path:
+                    result = replace(result, path=renamed)
         self.meter_db = METER_FLOOR_DB
         if recorder.error:
             self.notify(recorder.error, "error")

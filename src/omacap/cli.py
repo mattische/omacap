@@ -41,6 +41,7 @@ from .recorder import (
     available_encoders,
     build_output_path,
     rename_recording,
+    write_tags,
     ensure_format,
     default_output_dir,
     format_is_available,
@@ -464,14 +465,17 @@ def cmd_record(args: argparse.Namespace) -> int:
     # A file called omacap_2026-09-26_14-08-33 says nothing. When the player
     # reported one track for the whole capture, name it after that instead. An
     # explicit --name always wins.
-    if not args.name:
-        track = session.only_track
-        if track is not None:
+    track = session.only_track
+    if track is not None:
+        # Tags first: they are what every other tool reads, and unlike the
+        # filename they survive being moved or renamed.
+        tagged = write_tags(result.path, track.tags)
+        if not args.name:
             renamed = rename_recording(result.path, track.basename)
             if renamed != result.path:
                 result = replace(result, path=renamed)
-                if not args.quiet:
-                    print(f"named   after {track.label}")
+        if not args.quiet and (tagged or result.path.stem == track.basename):
+            print(f"named   after {track.label}")
 
     if args.quiet:
         print(result.path)
