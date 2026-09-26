@@ -517,7 +517,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.14.0"
+omacap: "0.15.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -626,7 +626,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.14.0"
+omacap: "0.15.0"
 ---
 ````
 
@@ -822,8 +822,12 @@ low` — because some of this is genuinely ambiguous:
   like an extension, which is why triads are the default: adding sevenths costs
   seven points of agreement against real charts. `--chords standard` asks for them
   anyway.
-- **Tempo doubling.** A tempo and half that tempo fit the same beats; omacap
-  picks the one that accounts for more of the onsets.
+- **Tempo doubling.** A tempo and double that tempo fit the same beats, and the
+  faster one always fits at least as well — a doubled grid contains every beat of
+  the true one, and hi-hats on every eighth *are* that doubled grid. So the choice
+  is made on the 40–120 Hz band, where the kick drum is, because the kick plays on
+  beats rather than on subdivisions. A tempo whose first estimate is already an
+  octave high still stays there; that one is not solved.
 
 Treat it as a good first draft of a chart, not a transcription. It is accurate on
 material with a steady pulse and clear harmony, and vaguer on free time, solo
@@ -842,6 +846,13 @@ themselves exact.
 
 `tools/score_against_charts.py` does that scoring against your own material, if you
 have charts to compare with.
+
+For cases real recordings cannot supply, `tools/ground_truth.py` renders
+arrangements whose every note is written down — bass, drums, a melody that leaves
+the chord, inversions, human timing, and metre changes mid-song. It writes the
+truth beside the audio, so a disagreement is omacap's rather than a matter of
+opinion. Current standing on eleven songs: tempo 8 of 9 where the metre is steady,
+metre 8 of 9, and 94% of bars carrying a chord with the right root.
 
 ### How the analysis works
 

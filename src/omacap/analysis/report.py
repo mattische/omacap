@@ -152,7 +152,8 @@ def analyse_buffer(
         )
 
     spectral = analyse_spectral(buffer.samples, buffer.sample_rate)
-    grid = analyse_tempo(spectral.onset, spectral.frame_rate)
+    grid = analyse_tempo(spectral.onset, spectral.frame_rate,
+                         low_onset=spectral.low_onset)
     if len(grid) < 4:
         raise AnalysisError(
             f"no steady beat found in {source.name}; it may not be music."

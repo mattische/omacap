@@ -135,3 +135,62 @@ def test_coverage_rewards_a_grid_that_explains_the_onsets():
     assert onset_coverage(on_grid, onset, FRAME_RATE) > onset_coverage(
         half_speed, onset, FRAME_RATE
     )
+
+
+# -- the octave decision ---------------------------------------------------
+
+def test_the_octave_is_judged_on_the_kick_band():
+    """A doubled beat grid is a superset of the true one.
+
+    Every real onset still lands on a beat at double speed, so any measure of how
+    well the beats explain the *full* band must prefer the double or tie - hi-hats
+    on every eighth are exactly the doubled grid. The kick plays on beats, so it
+    is what the decision is made on.
+    """
+    import inspect
+
+    from omacap.analysis import tempo
+
+    assert "low_onset" in inspect.signature(tempo.analyse_tempo).parameters
+
+
+def test_a_tie_between_a_tempo_and_its_double_keeps_the_slower():
+    """Which is what a correct tempo looks like against its own double."""
+    import numpy as np
+
+    from omacap.analysis.tempo import OCTAVE_GAIN, analyse_tempo
+
+    assert OCTAVE_GAIN > 1.0, "a tie must not be enough to switch"
+
+    # A click on every beat at 100 BPM. Doubling explains it no better.
+    rate = 43.07
+    beats = np.arange(0, 24) * 0.6
+    onset = np.zeros(int(beats[-1] * rate) + 40)
+    for when in beats:
+        onset[int(round(when * rate))] = 1.0
+    grid = analyse_tempo(onset, rate, low_onset=onset)
+    assert 90 <= grid.bpm <= 110, grid.bpm
+
+
+def test_coverage_cannot_argue_for_halving():
+    """A measured limitation, pinned so it is not mistaken for a bug later.
+
+    `onset_coverage` counts the onsets that land on a beat. At double speed every
+    onset still lands on one, so the score ties or improves - it can never argue
+    for the slower tempo. The 0.5 branch in `analyse_tempo` is therefore
+    unreachable in practice, and a tempo whose first estimate is already an octave
+    high stays there. Fixing that needs evidence coverage does not carry.
+    """
+    import numpy as np
+
+    from omacap.analysis.tempo import onset_coverage
+
+    rate = 43.07
+    # A click once a second: 60 BPM.
+    onset = np.zeros(int(20 * rate))
+    for index in range(20):
+        onset[int(round(index * rate))] = 1.0
+
+    slow = np.arange(0, 20, 1.0)          # 60 BPM, the truth
+    fast = np.arange(0, 20, 0.5)          # 120 BPM, its double
+    assert onset_coverage(fast, onset, rate) >= onset_coverage(slow, onset, rate)

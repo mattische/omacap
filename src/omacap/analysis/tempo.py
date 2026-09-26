@@ -15,6 +15,12 @@ PRIOR_WIDTH_OCTAVES = 1.0
 #: How strongly the beat tracker resists straying from the estimated period.
 TIGHTNESS = 100.0
 
+#: How much better an octave away has to look before it is taken. Judged on the
+#: kick band, a correct tempo ties with its own double (1.00-1.02) while a tempo
+#: that is genuinely half of the truth loses badly (1.17 and worse), so the
+#: threshold sits between those two measured groups.
+OCTAVE_GAIN = 1.10
+
 
 @dataclass
 class BeatGrid:
@@ -187,24 +193,36 @@ def refine_tempo(beats, fallback_bpm: float) -> float:
     return refined if MIN_BPM <= refined <= MAX_BPM else fallback_bpm
 
 
-def analyse_tempo(onset, frame_rate: float) -> BeatGrid:
-    """Estimate the tempo and lay a beat grid over the recording."""
+def analyse_tempo(onset, frame_rate: float, low_onset=None) -> BeatGrid:
+    """Estimate the tempo and lay a beat grid over the recording.
+
+    `low_onset` is the 40-120 Hz onset envelope - the kick drum. It is what the
+    octave decision is judged on; see below for why the full band cannot do it.
+    """
     np = require_numpy()
     base = estimate_tempo(onset, frame_rate)
     if base <= 0:
         return BeatGrid(bpm=0.0, beats=np.array([]), confidence=0.0)
 
     # Autocorrelation cannot tell a tempo from its own half or double, so try
-    # both and keep whichever accounts for more of the onsets.
-    best_bpm, best_beats, best_score = base, track_beats(onset, frame_rate, base), None
-    best_score = onset_coverage(best_beats, onset, frame_rate)
-    for factor, required_gain in ((2.0, 1.15), (0.5, 1.15)):
+    # both. The judgement is made on the kick band rather than the whole
+    # spectrum, because a doubled beat grid is a *superset* of the true one -
+    # every real onset still lands on a beat - so any measure of how well the
+    # beats explain the full band must prefer the double or tie. Hi-hats on
+    # every eighth are exactly the doubled grid. The kick plays on beats, so it
+    # collapses at half speed (measured: 0.20 against 1.00) while staying level
+    # between a tempo and its double, which is what makes a tie readable as "the
+    # base was already right".
+    judge = onset if low_onset is None else low_onset
+    best_bpm, best_beats = base, track_beats(onset, frame_rate, base)
+    best_score = onset_coverage(best_beats, judge, frame_rate)
+    for factor in (2.0, 0.5):
         candidate = base * factor
         if not (MIN_BPM <= candidate <= MAX_BPM):
             continue
         beats = track_beats(onset, frame_rate, candidate)
-        score = onset_coverage(beats, onset, frame_rate)
-        if score > best_score * required_gain:
+        score = onset_coverage(beats, judge, frame_rate)
+        if score > best_score * OCTAVE_GAIN:
             best_bpm, best_beats, best_score = candidate, beats, score
 
     bpm = refine_tempo(best_beats, best_bpm)
