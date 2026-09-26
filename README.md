@@ -8,20 +8,23 @@ music player. No cables, no microphone, no re-routing.
 
 It gives you a small terminal interface where **space** starts and stops the
 recording, and a plain CLI for scripts. If what you recorded is music, it can
-also work out the key, tempo, time signature and the chords in every bar, and
-write that out as a chord chart.
+also work out the key, tempo, time signature and the chords in every bar and
+write that out as a chord chart — in Markdown, plain text, or the `chordgrid`
+format Obsidian renders as a chart. A recording of a playlist can be cut into one
+named file per track.
 
 ```
-┌ omacap ────────────────────────────────────────────────────── v0.1.0 ┐
+┌ omacap ────────────────────────────────────────────────────── v0.9.0 ┐
 │                                                                      │
-│  ● REC                                                 02:14   3.1 MB│
-│  ████████████████████████████████████████████┄┄┄┄┄┄┄┄┄┄┄┄  -12.4 dB  │
+│  ● REC                                               02:14   3.0 MB  │
+│  █████████████████████████████████████████████┄┄┄┄┄┄┄┄┄┄┄┄  -12.4 dB │
 │                                                                      │
 │  Source  Monitor of USB Audio Analog Stereo                          │
 │  Format  mp3  ·  192k                                                │
 │          Lossy, universally playable. Good default for sharing.      │
 │  Folder  ~/Recordings/omacap                                         │
 │  Chart   .md                                                         │
+│  Playing trampe|strandberg – Reser bort, kommer hem                  │
 │                                                                      │
 ├ saved this session ──────────────────────────────────────────────────┤
 │  omacap_2026-09-25_08-52-01.mp3   00:42   1.1 MB                     │
@@ -263,8 +266,9 @@ omacap record -d 60 --analyze      # record, then chart it straight away
 ```
 
 `--analyze` (or `-A`) runs the analysis as soon as recording stops and writes the
-chart next to the recording. It takes the same `--chords`, `--chart-format` and
-`--bars-per-line` options as `omacap analyze`:
+chart next to the recording. It takes every chart option `omacap analyze` takes —
+`--chords`, `--chart-format`, `--bars-per-line`, `--no-collapse`,
+`--no-sections`, `--no-frontmatter`:
 
 ```bash
 omacap record -d 60 -A -c simple -t txt
@@ -443,38 +447,68 @@ Each chart is written beside its recording. One file that cannot be analysed doe
 not stop the rest; the run only fails if none of them could be.
 
 ```
-key     G major (1 sharp)
+key     E minor (1 sharp)
 tempo   124 BPM
 metre   4/4
 bars    139
 chart   /home/you/Recordings/omacap/omacap_2026-09-25_08-52-01.md
 ```
 
-The chart itself:
+The chart itself, with the summary omacap actually writes:
 
 ````markdown
+---
+title: "omacap_2026-09-25_08-52-01"
+key: "E minor"
+tonic: "E"
+mode: "minor"
+key_signature: "1 sharp"
+tempo: 124
+time_signature: "4/4"
+bars: 139
+length: "4:30"
+feel: "straight eighths"
+syncopation: "played straight"
+chords: ["D", "C", "Em", "Am", "G", "A", "Bm"]
+confidence_key: "high"
+confidence_tempo: "high"
+confidence_time_signature: "high"
+source: "omacap_2026-09-25_08-52-01.wav"
+omacap: "0.9.0"
+---
+
 # omacap_2026-09-25_08-52-01
 
 | | |
 | --- | --- |
-| **Key** | G major (1 sharp) |
+| **Key** | E minor (1 sharp) |
 | **Tempo** | 124 BPM |
 | **Time signature** | 4/4 |
+| **Feel** | straight eighths (off-beat at 0.51 of the beat) |
+| **Syncopation** | played straight |
 | **Bars** | 139 |
 | **Length** | 4:30 |
-| **Chords used** | D, C, Em, D7 |
+| **Chords used** | D, C, Em, Am, G, A, Bm |
 | **Confidence** | key high, tempo high, time signature high |
 
 ## Chart
 
-Bars read left to right, 4 per line.
+Form: A×3 B×2 C×2 C×2 B×2 A×2 B×2 D×3. A repeated phrase is written once, with
+the number of times to play it.
+A `?` marks a bar the audio matched less well than the rest of the song.
 
 ```
- 1 | D      | C      | Em     | D      |
- 5 | D      | C      | Em     | D      |
- 9 | D      | C      | C Em   | D      |
+  1 | G       | N.C.?   | N.C.?   | N.C.?   |
+  5 | N.C.?   |
+  6 | C       | Em      | D       | D       |
+    | C       | Em      | D       | D       |  A×3
+ 30 | D?      |
+ 31 | Em      | C       | Am      | C       |
+    | D       | D       | D       | Am      |  B×2
 ```
 ````
+
+The `?`, the `A×3` and the `Form:` line each have a section of their own below.
 
 In the interactive interface, press **a** after a take to do the same thing, and
 **t** to cycle the chart format: `.md`, `.txt`, then `chordgrid`. The format is
@@ -646,13 +680,19 @@ songs - see `CLAUDE.md`. `--no-sections` writes one grid for the whole song.
 Detected: **time signature** (4/4, 3/4, 6/8, 5/4, 7/8), **key** (all 24 major and
 minor keys, with the key signature), **tempo** in BPM, the **feel** — whether the
 beat is played straight or swung, and where the off-beat sits — the **number of
-bars**, and the **chords in each bar**.
+bars**, the **chords in each bar**, and the **form**: which phrases repeat, and
+how often.
 
-**Syncopation** is measured too, per song and per section. A note on a weak
-position where the stronger position after it is empty has displaced it, and that
-is what the score counts. Straight eighths score zero - correctly, since every
-off-beat there is followed by a beat that *is* played - and a pattern that
-anticipates the bar line scores high.
+**Syncopation** is measured too. A note on a weak position where the stronger
+position after it is empty has displaced it, and that is what the score counts.
+Straight eighths score zero — correctly, since every off-beat there is followed by
+a beat that *is* played — and a pattern anticipating the bar line scores high.
+
+It is scored per section, because a syncopated chorus and a straight verse cancel
+each other out: one recording here reads "played straight" over the whole song
+while one of its sections is four times as displaced as the rest. A section is
+only called syncopated when it reaches the level a written-out syncopation
+reaches, so a merely uneven song is not labelled one.
 
 What is **not** written is a rhythm inside the grid. The plugin can notate one,
 but omacap measures onsets over the whole mix, so a drummer playing eighths on
@@ -661,12 +701,6 @@ sections of six recordings the derived pattern was all eighths or all quarters
 eighteen times, and the other two changed as soon as the threshold moved. A strum
 pattern with rests in it cannot be recovered from a mix where the drums fill the
 rests.
-
-Syncopation is measured per section because a syncopated chorus and a straight verse
-average each other away: one recording here reads "played straight" over the
-whole song while one of its sections is four times as displaced as the rest. A
-section is only called syncopated when it reaches the level a written-out
-syncopation reaches, so a merely uneven song is not labelled one.
 
 Where a judgement was a close call, the chart says so on the line itself:
 
@@ -683,14 +717,18 @@ wrong, every bar is, however good the chords are.
 Every chart also carries a confidence line — `key high, tempo high, time signature
 low` — because some of this is genuinely ambiguous:
 
-- **Relative keys.** A minor and C major use identical notes. omacap decides
-  between them from the chord sequence, which is usually right but not always.
+- **Relative keys.** A minor and C major use identical notes, so the note
+  distribution cannot separate them at all — whatever it says about one it says
+  about the other. Only the chord sequence can, so when the top two candidates are
+  a relative pair, that is what decides. Usually right, not always.
 - **3/4 against 6/8.** These are the same pulse grouped differently; only how
   strongly the middle of the bar is accented separates them.
 - **2/4.** Indistinguishable from 4/4 in audio, and reported as 4/4 — which is
   how popular music writes it anyway.
 - **Sevenths and suspensions.** A melody note passing over a triad looks a lot
-  like an extension. Use `--chords simple` if that gets noisy.
+  like an extension, which is why triads are the default: adding sevenths costs
+  seven points of agreement against real charts. `--chords standard` asks for them
+  anyway.
 - **Tempo doubling.** A tempo and half that tempo fit the same beats; omacap
   picks the one that accounts for more of the onsets.
 
@@ -700,11 +738,14 @@ melody, speech or heavy distortion.
 
 **How accurate, measured.** On synthesised material with known ground truth: tempo
 exact on 12 of 12 click tracks from 60 to 200 BPM, time signature right on 11 of
-12, chords 93% per bar. Against three real band recordings whose players wrote
-their own chord charts: **90% of bars on average carry a chord the chart uses**
-(82–95% across the three), the time signature was right for all three, and the key
-for two — the third is called as the relative major, which shares every chord, and
-is reported as medium confidence rather than as certain.
+12 (the miss is fast 3/4, which correctly reports low confidence), chords 93% per
+bar. Against three real band recordings whose players wrote their own chord
+charts: **92% of bars on average carry a chord the chart uses** (86–95% across the
+three), and the time signature and the key were right for all three.
+
+Those figures are a floor rather than a ceiling, because the charts they are
+scored against were written by the people who played the songs and are not
+themselves exact.
 
 `tools/score_against_charts.py` does that scoring against your own material, if you
 have charts to compare with.
@@ -729,13 +770,21 @@ No machine learning and no scientific stack — just numpy and ffmpeg:
    where compression has evened the accents out.
 6. **Chords**: chroma averaged per beat and correlated against chord templates,
    then smoothed by a Viterbi pass that charges a fixed cost per chord change.
-7. **Key**: Krumhansl-Schmuckler profiles, with the chord sequence casting the
-   deciding vote between a key and its relative.
+7. **Key**: Krumhansl-Schmuckler profiles against the chromagram. Because a key
+   and its relative hold identical notes, the chromagram cannot separate those two
+   at all, so when they come first and second the chord sequence decides alone.
 8. **Chords again**: now that the key is known, the chords are recognised a second
    time with the diatonic ones favoured slightly, which settles the close calls.
 9. **Feel**: the onset strength is averaged over every beat, which says where the
    off-beat falls. Half way is straight; two thirds is triplet swing. Measured
    against patterns played on purpose, that position is recovered to within 0.01.
+10. **Structure**: phrases of eight or four bars played more than once in a row
+    are found, so the chart can write a verse once instead of three times, and
+    name the song's form.
+11. **Syncopation**: onset strength averaged over each position of the bar, scored
+    by how far a weak position stands above the stronger one after it — per
+    section, because a syncopated chorus and a straight verse cancel out over a
+    whole song.
 
 ## Formats
 
@@ -772,7 +821,8 @@ container trailer instead of leaving a truncated file.
 Splitting works on one continuous recording rather than switching files mid-take,
 which would risk losing audio at every boundary. While recording, omacap collects
 two things: the gaps, reported by ffmpeg on the same channel as the peak level,
-and the track changes, read from the media player once a second. A **track change
+and the track changes, read from the media player four times a second — a
+`busctl` call costs about 2 ms, so asking often is free. A **track change
 decides whether to cut; a gap decides where**. Pausing or seeking inside a track
 makes a gap without changing the track, so neither splits the file; a track change
 with no gap around it — crossfade, gapless — still splits, just without a gap to
@@ -826,12 +876,18 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The test suite needs no sound card and no music files. Recording is tested
-against a stub `ffmpeg` on `PATH`, so process handling, progress parsing and
-shutdown behaviour are exercised for real while staying reproducible; reading the
-media player is tested against a scripted `busctl`. The analysis is tested against
+860 tests, needing no sound card and no music files. Recording is tested against a
+stub `ffmpeg` on `PATH`, so process handling, progress parsing and shutdown
+behaviour are exercised for real while staying reproducible; reading the media
+player is tested against a scripted `busctl`. The analysis is tested against
 synthesised audio with a known tempo, key, metre and chord progression, so every
 claim it makes is checked against ground truth.
+
+Two guarantees have tests of their own. `tests/test_no_numpy.py` imports every
+recording-side module in a fresh interpreter with numpy blocked, because recording
+must not need it. `tests/test_chordgrid.py` holds omacap's output to the Obsidian
+plugin's own grammar, which is strict: a bar the plugin cannot read as chords it
+reads as *rhythm*, so an invalid bar is not ignored but drawn as something else.
 
 For the part that cannot be faked there is a live check, which plays a generated
 chord progression out of the sound card, records it back, drives the real
@@ -841,6 +897,12 @@ interface, and confirms the analysis returns what was played:
 python tools/live_check.py            # makes sound
 python tools/live_check.py --music song.mp3
 ```
+
+`tools/` also holds the harnesses the analysis was worked out on, each recording
+what was measured and what was rejected: `score_against_charts.py` scores against
+charts you have written yourself, `syncopation_probe.py` holds the anchors the
+syncopation scale is read against, and `bass_probe.py` records how close bass-note
+transcription came and what stopped it.
 
 ## License
 
