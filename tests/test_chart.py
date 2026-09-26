@@ -575,3 +575,22 @@ def test_only_the_frontmatter_uses_a_triple_dash(analysis):
     assert len(fences) == 2, "exactly the frontmatter, opened and closed"
     assert fences[0] == 0, "and at the very top, or Obsidian will not read it"
     assert "***" in lines          # the rule above the footer instead
+
+
+def test_every_chordgrid_block_opens_with_the_directives(two_part_song):
+    from omacap.chart import chordgrid_lines
+
+    lines = chordgrid_lines(two_part_song)
+    opens = [n for n, line in enumerate(lines) if line == "```chordgrid"]
+    assert len(opens) > 1, "expected several sections"
+    for n in opens:
+        assert lines[n + 1].startswith("show% measure-num"), lines[n + 1]
+        assert lines[n + 1].endswith("count")
+
+
+def test_a_single_block_chart_opens_with_them_too(analysis):
+    from omacap.chart import chordgrid_lines
+
+    lines = chordgrid_lines(analysis, sections=False)
+    assert lines[0] == "```chordgrid"
+    assert lines[1] == "show% measure-num count"

@@ -211,3 +211,31 @@ def test_rhythm_in_a_bar_adds_up_to_the_bar(analysis_song):
             continue
         assert sum(lengths[v] for v in values) == pytest.approx(per_bar), \
             (bar.number, text)
+
+
+# -- directives -----------------------------------------------------------
+
+def test_the_directive_line_is_what_was_asked_for():
+    from omacap.chordgrid import directive_line
+
+    assert directive_line() == "show% measure-num count"
+
+
+def test_a_section_numbers_from_its_own_first_bar():
+    """Otherwise every block restarts at 1 and contradicts its heading."""
+    from omacap.chordgrid import directive_line
+
+    assert directive_line(31) == "show% measure-num: 31 count"
+    assert directive_line(1) == "show% measure-num count"   # no point saying ": 1"
+
+
+def test_the_plugin_reads_the_start_number():
+    """The plugin's own pattern for it, so the spelling cannot drift."""
+    import re
+
+    from omacap.chordgrid import directive_line
+
+    plugin = re.compile(r"measure-num(?::\s*(\d+)(?:[,\-](\d+))?)?", re.I)
+    match = plugin.search(directive_line(31))
+    assert match and match.group(1) == "31"
+    assert plugin.search(directive_line()).group(1) is None

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .analysis.chords import NO_CHORD
-from .chordgrid import bar_source
+from .chordgrid import bar_source, directive_line
 
 #: Bars per line. Four is how lead sheets are normally laid out.
 BARS_PER_LINE = 4
@@ -318,11 +318,8 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
     spans = getattr(analysis, "chords", [])
     rows = _layout(analysis, bars_per_line, collapse)
 
-    def grid(block_rows: list, numbered: bool) -> list[str]:
-        head = ["```chordgrid"]
-        if numbered:
-            head += ["measure-num", ""]
-        head += [meter.name, ""]
+    def grid(block_rows: list, first_bar: int | None = None) -> list[str]:
+        head = ["```chordgrid", directive_line(first_bar), "", meter.name, ""]
         body = []
         for _, row, _, repeats, mark in block_rows:
             cells = " | ".join(bar_source(bar, spans, meter) for bar in row)
@@ -337,11 +334,11 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
         return head + body + ["```"]
 
     if not sections:
-        return grid(rows, numbered=True)
+        return grid(rows)
 
     groups = _group_rows(rows, bars_per_line)
     if len(groups) < 2:
-        return grid(rows, numbered=True)
+        return grid(rows)
     syncopated = set(getattr(analysis, "syncopated_sections", {}))
 
     # One block per section, with the label above it in plain markdown. The bar
@@ -354,7 +351,7 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
                                      last=index == len(groups) - 1,
                                      syncopated=syncopated))
         lines.append("")
-        lines += grid(section.rows, numbered=False)
+        lines += grid(section.rows, first_bar=section.start)
     return lines
 
 

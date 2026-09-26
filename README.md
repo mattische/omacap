@@ -483,7 +483,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.10.2"
+omacap: "0.11.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -508,6 +508,8 @@ the number of times to play it.
 **Intro** · bars 1–5
 
 ```chordgrid
+show% measure-num count
+
 4/4
 
 | G | -1 | -1 | -1 |
@@ -517,6 +519,8 @@ the number of times to play it.
 **A** · bars 6–30 · played 3 times
 
 ```chordgrid
+show% measure-num: 6 count
+
 4/4
 
 ||: C | Em | D | D |
@@ -586,7 +590,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.10.2"
+omacap: "0.11.0"
 ---
 ````
 
@@ -652,6 +656,8 @@ omacap analyze take.flac -t chordgrid
 **A** · bars 6–30 · played 3 times
 
 ```chordgrid
+show% measure-num: 6 count
+
 4/4
 
 ||: C | Em | D | D |
@@ -679,6 +685,18 @@ changed on the last beat. Where a bar's chords do not divide it evenly, their
 real lengths are written as note values - `C[2.] G[4]` is three beats then one -
 and that is checked against the metre, so `Am[4] D[2]` is what the same split
 looks like in 3/4.
+
+Every block opens with the same directives:
+
+````
+show% measure-num count
+````
+
+`show%` draws a repeat sign where a measure repeats the one before it,
+`measure-num` numbers the bars, and `count` writes the counting numbers under a
+rhythm. A section that starts part-way through the song numbers from its own first
+bar — `show% measure-num: 31 count` — so the numbering agrees with the heading
+above it instead of restarting at 1 in every block.
 
 ### Sections
 

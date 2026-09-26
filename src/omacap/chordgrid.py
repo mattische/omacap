@@ -43,6 +43,27 @@ CHORDS_ONLY = re.compile(f"^{CHORD}(?:\\s+/\\s+{CHORD})*$")
 SEPARATOR = " / "
 
 
+# -- directives -----------------------------------------------------------
+
+#: What every block opens with. ``show%`` draws a repeat sign where a measure
+#: repeats the one before it, ``measure-num`` numbers the bars, and ``count``
+#: writes the counting numbers under a rhythm.
+DIRECTIVES = ("show%", "measure-num", "count")
+
+
+def directive_line(first_bar: int | None = None) -> str:
+    """The directive line for a block, numbered from ``first_bar`` when given.
+
+    ``measure-num`` takes a starting number, which the plugin reads as
+    ``measure-num: 31``. Without it every block would number from 1, so a section
+    beginning at bar 31 would contradict the heading above it.
+    """
+    numbering = ("measure-num" if first_bar in (None, 1)
+                 else f"measure-num: {first_bar}")
+    return " ".join(numbering if name == "measure-num" else name
+                    for name in DIRECTIVES)
+
+
 def is_chords(text: str) -> bool:
     """Would the plugin read this bar as chords?"""
     return bool(CHORDS_ONLY.match(text.strip()))
