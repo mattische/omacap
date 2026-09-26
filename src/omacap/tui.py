@@ -14,7 +14,12 @@ from pathlib import Path
 
 from . import capture, ui
 from .analysis import analysis_available
-from .chart import CHART_FORMATS, default_chart_path, write_chart
+from .chart import (
+    CHART_FORMATS,
+    chart_format_label,
+    default_chart_path,
+    write_chart,
+)
 from .devices import AudioSystemError, Source, list_monitors, resolve_source
 from .formats import FORMATS, AudioFormat, get_format, next_format
 from .updater import notice_line, pending_update
@@ -373,7 +378,7 @@ class TuiApp:
     def cycle_chart_format(self) -> None:
         index = CHART_FORMATS.index(self.chart_format)
         self.chart_format = CHART_FORMATS[(index + 1) % len(CHART_FORMATS)]
-        self.notify(f"Charts will be written as .{self.chart_format}.")
+        self.notify(f"Charts will be written as {chart_format_label(self.chart_format)}.")
 
     def cycle_format(self, step: int = 1) -> None:
         if self.busy("Stop recording before changing the format."):

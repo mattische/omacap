@@ -488,6 +488,17 @@ def write_chart(
     return path
 
 
+def chart_format_label(chart_format: str = DEFAULT_CHART_FORMAT) -> str:
+    """How to name a format on screen.
+
+    `chordgrid` is a format, not a file extension - the file it writes is still
+    Markdown - so showing it as ".chordgrid" would name a file that never exists.
+    """
+    wanted = get_chart_format(chart_format)
+    extension = CHART_EXTENSIONS[wanted]
+    return extension if f".{wanted}" == extension else f"{wanted} ({extension})"
+
+
 def default_chart_path(audio_path: Path, chart_format: str = DEFAULT_CHART_FORMAT) -> Path:
     """The chart file that sits beside a recording."""
     audio_path = Path(audio_path)

@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import __version__
+from .chart import chart_format_label
 from .recorder import METER_FLOOR_DB
 
 MIN_WIDTH = 48
@@ -36,7 +37,7 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("n", "name the next recording"),
     ("a", "analyse the last take into a chord chart"),
     ("y / n", "answer the question asked after a recording"),
-    ("t", "chart format: markdown or plain text"),
+    ("t", "chart format: markdown, plain text or chordgrid"),
     ("?", "toggle this help"),
     ("q", "quit"),
 )
@@ -219,7 +220,7 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
     screen.field("Format", fmt_value, BOLD)
     screen.field("", vm.format_description, DIM)
     screen.field("Folder", vm.output_dir)
-    screen.field("Chart", f".{vm.chart_format}")
+    screen.field("Chart", chart_format_label(vm.chart_format))
     if vm.player_label:
         playing = vm.player_label
         if vm.state == "recording" and vm.track_count:

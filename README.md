@@ -222,7 +222,7 @@ pressing play will not stop it straight away.
 | `n` | name the next recording |
 | `a` | analyse the last take into a chord chart |
 | `y` / `n` | answer the question asked after a recording |
-| `t` | chart format: markdown or plain text |
+| `t` | chart format: markdown, plain text or chordgrid |
 | `?` or `h` | show the key list |
 | `q` | quit |
 
@@ -477,7 +477,9 @@ Bars read left to right, 4 per line.
 ````
 
 In the interactive interface, press **a** after a take to do the same thing, and
-**t** to switch between `.md` and `.txt`.
+**t** to cycle the chart format: `.md`, `.txt`, then `chordgrid`. The format is
+shown on screen, and chordgrid is named rather than written as an extension
+because the file it produces is still Markdown.
 
 ### Analysis options
 
