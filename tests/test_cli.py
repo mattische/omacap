@@ -205,7 +205,7 @@ def test_analyze_writes_a_chart_beside_the_recording(capsys, recording):
     chart = recording.with_suffix(".md")
     assert chart.is_file()
     text = chart.read_text(encoding="utf-8")
-    assert text.startswith("# Loop Take")
+    assert "# Loop Take" in text
     assert "4/4" in text and "120 BPM" in text
     out = capsys.readouterr().out
     assert "key" in out and "tempo" in out and "bars" in out
@@ -231,7 +231,10 @@ def test_the_output_extension_selects_the_chart_format(recording, tmp_path):
 def test_the_chart_format_flag_wins_over_the_extension(recording, tmp_path):
     target = tmp_path / "chart.txt"
     cli.main(["analyze", str(recording), "-o", str(target), "-t", "md"])
-    assert target.read_text(encoding="utf-8").startswith("# ")
+    text = target.read_text(encoding="utf-8")
+    # Markdown, despite the .txt name: frontmatter and a heading, not a plain
+    # text chart, which has neither.
+    assert text.startswith("---\n") and "\n# " in text
 
 
 def test_analyze_can_print_instead_of_writing(capsys, recording):

@@ -491,6 +491,7 @@ because the file it produces is still Markdown.
 | `--bars-per-line` | bars per line in the grid (default: 4) |
 | `--no-collapse` | write every bar out instead of collapsing repeated phrases |
 | `--no-sections` | one chordgrid block for the whole song, not one per section |
+| `--no-frontmatter` | leave the YAML properties block out of a markdown chart |
 | `-p, --print` | print the chart instead of writing a file |
 
 The chord vocabulary is the setting worth knowing about:
@@ -507,6 +508,40 @@ own charts, `simple` agrees 92% of the time, `standard` 85% and `full` 67% - and
 the colourings break up the repeats too, taking the longest loop the analysis
 reproduces from 45 bars down to 6. A root chord you can play beats a seventh
 that might be wrong.
+
+### Properties in the vault
+
+A markdown chart - `md` or `chordgrid` - starts with YAML frontmatter, so Obsidian
+shows the song's facts as properties and they can be searched and sorted:
+
+````yaml
+---
+title: "MEDS sessionmix instr"
+key: "E minor"
+tonic: "E"
+mode: "minor"
+key_signature: "1 sharp"
+tempo: 124
+time_signature: "4/4"
+bars: 139
+length: "4:30"
+feel: "straight eighths"
+syncopation: "played straight"
+chords: ["D", "C", "Em", "Am", "G", "A", "Bm"]
+confidence_key: "high"
+confidence_tempo: "high"
+confidence_time_signature: "high"
+source: "MEDS sessionmix instr.mp3"
+omacap: "0.9.0"
+---
+````
+
+Nothing in it changes between runs, on purpose: re-analysing a recording should
+not produce a file that differs only by a timestamp, because these live in a
+synced vault. Every value is quoted - a chord called `C#` written bare would have
+the `#` read as a YAML comment and the rest of the line lost. A plain-text chart
+has no frontmatter, since it is a Markdown convention. `--no-frontmatter` turns
+it off.
 
 ### Bars worth a second listen
 

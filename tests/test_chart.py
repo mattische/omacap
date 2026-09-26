@@ -111,8 +111,12 @@ def test_a_song_with_no_bars_says_so():
 
 # -- markdown -------------------------------------------------------------
 
-def test_markdown_starts_with_the_song_title(analysis):
-    assert render_markdown(analysis).splitlines()[0] == "# My Song"
+def test_markdown_heads_the_document_with_the_song_title(analysis):
+    # The frontmatter comes first, because that is where Obsidian reads it; the
+    # title is the first thing a reader sees.
+    body = render_markdown(analysis).split("---\n", 2)[-1].lstrip("\n")
+    assert body.splitlines()[0] == "# My Song"
+    assert render_markdown(analysis, frontmatter=False).splitlines()[0] == "# My Song"
 
 
 def test_markdown_puts_the_facts_in_a_table(analysis):
@@ -171,7 +175,7 @@ def test_writing_creates_the_file_and_any_folders(analysis, tmp_path):
     target = tmp_path / "charts" / "song.md"
     written = write_chart(analysis, target)
     assert written == target
-    assert target.read_text(encoding="utf-8").startswith("# My Song")
+    assert "# My Song" in target.read_text(encoding="utf-8")
 
 
 def test_writing_plain_text(analysis, tmp_path):
@@ -292,7 +296,7 @@ def test_chordgrid_bars_are_written_between_pipes(analysis):
 def test_chordgrid_renders_through_the_dispatcher(analysis):
     text = render(analysis, "chordgrid")
     assert "```chordgrid" in text
-    assert text.startswith("# ")            # still a markdown document
+    assert "\n# " in text                   # still a markdown document
 
 
 def test_a_chordgrid_chart_is_written_as_markdown(analysis, tmp_path):
@@ -416,3 +420,123 @@ def test_bars_per_line_is_not_claimed_once_each_section_has_its_own_grid(
     # A chart that is not split into sections still says how it is laid out.
     assert "per line" in render(two_part_song, "md")
     assert "per line" in render(two_part_song, "chordgrid", sections=False)
+
+
+# -- frontmatter ----------------------------------------------------------
+
+def test_a_markdown_chart_starts_with_frontmatter(analysis):
+    text = render(analysis, "md")
+    assert text.startswith("---\n")
+    assert text.split("---")[1].strip().startswith("title:")
+
+
+def test_frontmatter_carries_the_song_s_facts(analysis):
+    from omacap.chart import frontmatter_lines
+
+    fields = dict(line.split(": ", 1) for line in frontmatter_lines(analysis)
+                  if ": " in line)
+    assert fields["bars"] == str(analysis.bar_count)
+    assert fields["tempo"] == str(round(analysis.tempo))
+    assert analysis.key.name in fields["key"]
+    assert analysis.meter.name in fields["time_signature"]
+    assert fields["source"] == f'"{analysis.source.name}"'
+
+
+def test_a_text_chart_has_no_frontmatter(analysis):
+    assert not render(analysis, "txt").startswith("---")
+
+
+def test_frontmatter_can_be_left_out(analysis):
+    assert not render(analysis, "md", frontmatter=False).startswith("---")
+    assert not render(analysis, "chordgrid", frontmatter=False).startswith("---")
+
+
+def test_a_sharp_chord_cannot_comment_out_the_rest_of_the_line():
+    """`C#` written bare in YAML loses everything after the hash."""
+    from omacap.chart import yaml_list, yaml_scalar
+
+    assert yaml_scalar("C#") == '"C#"'
+    assert yaml_list(["C#", "Bb", "F#m7"]) == '["C#", "Bb", "F#m7"]'
+
+
+def test_a_title_with_quotes_or_colons_survives():
+    from omacap.chart import yaml_scalar
+
+    assert yaml_scalar('He said "no": take 2') == '"He said \\"no\\": take 2"'
+    assert yaml_scalar("4:30") == '"4:30"'
+    assert yaml_scalar("back\\slash") == '"back\\\\slash"'
+
+
+def test_numbers_are_written_as_numbers():
+    from omacap.chart import yaml_scalar
+
+    assert yaml_scalar(139) == "139"
+    assert yaml_scalar(124.4) == "124.4"
+    assert yaml_scalar(True) == "true"
+
+
+def test_frontmatter_does_not_change_between_runs(analysis):
+    """These files live in a synced vault; a timestamp would churn every one."""
+    from omacap.chart import frontmatter_lines
+
+    assert frontmatter_lines(analysis) == frontmatter_lines(analysis)
+
+
+def test_the_frontmatter_block_is_closed(analysis):
+    from omacap.chart import frontmatter_lines
+
+    lines = frontmatter_lines(analysis)
+    assert lines[0] == "---"
+    assert lines.count("---") == 2
+    assert lines[-2] == "---"
+
+
+def test_the_frontmatter_parses_as_yaml(analysis):
+    """Checked with a real parser where one is installed.
+
+    omacap depends on nothing, so PyYAML is not required - but when it happens to
+    be available there is no reason to trust a hand-rolled writer on faith.
+    """
+    yaml = pytest.importorskip("yaml")
+
+    from omacap.chart import frontmatter_lines
+
+    block = "\n".join(frontmatter_lines(analysis)[1:-2])
+    fields = yaml.safe_load(block)
+    assert isinstance(fields, dict)
+    assert fields["bars"] == analysis.bar_count      # a number, not a string
+    assert fields["title"] == analysis.source.stem
+    assert isinstance(fields["chords"], list)
+
+
+@pytest.mark.parametrize("value", [
+    "C#", "Bb", 'He said "no": take 2', "4:30", "- leading dash",
+    "&anchor *alias", "~", "", "#hash", "a\\backslash", "line\twith\ttabs",
+    "En psalm till vänner", "100%", "{braces}", "[brackets]",
+])
+def test_any_value_round_trips_through_yaml(value):
+    yaml = pytest.importorskip("yaml")
+
+    from omacap.chart import yaml_scalar
+
+    assert yaml.safe_load(f"field: {yaml_scalar(value)}")["field"] == value
+
+
+def test_a_chord_list_round_trips_through_yaml():
+    yaml = pytest.importorskip("yaml")
+
+    from omacap.chart import yaml_list
+
+    chords = ["C#", "Bb", "F#m7", "Ab", "D#dim", "N.C."]
+    assert yaml.safe_load(f"chords: {yaml_list(chords)}")["chords"] == chords
+
+
+def test_no_field_name_is_a_yaml_boolean(analysis):
+    """`yes:` and `on:` are parsed as booleans by YAML 1.1, so no key may be one."""
+    from omacap.chart import frontmatter_lines
+
+    reserved = {"y", "yes", "n", "no", "true", "false", "on", "off", "null"}
+    names = [line.split(":", 1)[0] for line in frontmatter_lines(analysis)
+             if ":" in line]
+    assert names, "expected some fields"
+    assert not reserved & {name.lower() for name in names}

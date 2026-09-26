@@ -359,6 +359,72 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
 CERTAIN = 0.75
 
 
+# -- frontmatter ----------------------------------------------------------
+
+def yaml_scalar(value) -> str:
+    """One YAML value, quoted so nothing in it can be misread.
+
+    There is no YAML library here - omacap depends on nothing - so quoting is
+    done rather than trusted. It matters more than it looks: a chord called `C#`
+    written bare would have the `#` read as a comment and the value lost, and a
+    time like `4:30` bare is a mapping, not a string.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:g}"
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def yaml_list(values) -> str:
+    """A flow list, each item quoted."""
+    return "[" + ", ".join(yaml_scalar(v) for v in values) + "]"
+
+
+def frontmatter_lines(analysis) -> list[str]:
+    """YAML frontmatter, so Obsidian shows the song's facts as properties.
+
+    Deliberately free of anything that changes between runs: re-analysing a
+    recording should not produce a file that differs only by a timestamp, because
+    these live in a synced vault.
+    """
+    from . import __version__
+
+    key = analysis.key
+    fields: list[tuple[str, str]] = [
+        ("title", yaml_scalar(analysis.source.stem)),
+        ("key", yaml_scalar(key.name)),
+        ("tonic", yaml_scalar(key.name.split()[0])),
+        ("mode", yaml_scalar(key.mode)),
+        ("key_signature", yaml_scalar(key.signature)),
+        ("tempo", yaml_scalar(round(analysis.tempo))),
+        ("time_signature", yaml_scalar(analysis.meter.name)),
+        ("bars", yaml_scalar(analysis.bar_count)),
+        ("length", yaml_scalar(format_clock(analysis.duration))),
+    ]
+
+    feel = getattr(analysis, "rhythm", None)
+    if feel is not None and feel.feel != "unclear":
+        fields.append(("feel", yaml_scalar(feel.feel)))
+    if getattr(analysis, "section_syncopation", None):
+        fields.append(("syncopation", yaml_scalar(analysis.syncopation_feel)))
+
+    fields += [
+        ("chords", yaml_list(_played_chords(analysis))),
+        ("confidence_key", yaml_scalar(confidence_word(key.confidence))),
+        ("confidence_tempo",
+         yaml_scalar(confidence_word(analysis.tempo_confidence))),
+        ("confidence_time_signature",
+         yaml_scalar(confidence_word(analysis.meter.confidence))),
+        ("source", yaml_scalar(analysis.source.name)),
+        ("omacap", yaml_scalar(__version__)),
+    ]
+    return ["---"] + [f"{name}: {value}" for name, value in fields] + ["---", ""]
+
+
 def summary_rows(analysis) -> list[tuple[str, str]]:
     """The facts that head the chart, as label/value pairs.
 
@@ -420,10 +486,11 @@ FOOTER = (
 
 def render_markdown(analysis, bars_per_line: int = BARS_PER_LINE,
                     grid: bool = False, collapse: bool = True,
-                    sections: bool = True) -> str:
+                    sections: bool = True, frontmatter: bool = True) -> str:
     """A Markdown chart, with the grid kept in a code block so it stays aligned."""
     rows = summary_rows(analysis)
-    lines = [f"# {analysis.source.stem}", "", "| | |", "| --- | --- |"]
+    lines = frontmatter_lines(analysis) if frontmatter else []
+    lines += [f"# {analysis.source.stem}", "", "| | |", "| --- | --- |"]
     for label, value in rows:
         lines.append(f"| **{label}** | {value} |")
     lines += ["", "## Chart", ""]
@@ -462,13 +529,15 @@ def render_text(analysis, bars_per_line: int = BARS_PER_LINE,
 
 def render(analysis, chart_format: str = DEFAULT_CHART_FORMAT,
            bars_per_line: int = BARS_PER_LINE, collapse: bool = True,
-           sections: bool = True) -> str:
+           sections: bool = True, frontmatter: bool = True) -> str:
     """Render in the requested format."""
     wanted = get_chart_format(chart_format)
     if wanted == "txt":
+        # Frontmatter is a Markdown convention; a text chart has no use for it.
         return render_text(analysis, bars_per_line, collapse)
     return render_markdown(analysis, bars_per_line, grid=wanted == "chordgrid",
-                           collapse=collapse, sections=sections)
+                           collapse=collapse, sections=sections,
+                           frontmatter=frontmatter)
 
 
 def write_chart(
@@ -478,12 +547,14 @@ def write_chart(
     bars_per_line: int = BARS_PER_LINE,
     collapse: bool = True,
     sections: bool = True,
+    frontmatter: bool = True,
 ) -> Path:
     """Write the chart to ``path``."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        render(analysis, chart_format, bars_per_line, collapse, sections),
+        render(analysis, chart_format, bars_per_line, collapse, sections,
+               frontmatter),
         encoding="utf-8")
     return path
 
