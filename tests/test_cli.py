@@ -250,7 +250,7 @@ def test_the_simple_vocabulary_writes_only_triads(capsys, recording):
 
 
 def test_bars_per_line_is_configurable(capsys, recording):
-    cli.main(["analyze", str(recording), "--bars-per-line", "2",
+    cli.main(["analyze", str(recording), "-t", "md", "--bars-per-line", "2",
               "--no-collapse", "--print"])
     grid = capsys.readouterr().out.split("```")[1].strip().splitlines()
     assert len(grid) == 6          # 12 bars, two per line
@@ -1187,3 +1187,36 @@ def test_a_named_file_need_not_look_like_audio(tmp_path):
     odd = tmp_path / "recording.dat"
     odd.touch()
     assert resolve_inputs([str(odd)]) == [odd]
+
+
+def test_analyze_writes_the_rendering_format_by_default(capsys, recording):
+    """The default has to hold where the user actually meets it: the command.
+
+    The constant was changed once without these call sites following, and the
+    library test passed while `omacap analyze` still wrote the old format.
+    """
+    assert cli.main(["analyze", str(recording)]) == 0
+    text = recording.with_suffix(".md").read_text(encoding="utf-8")
+    assert "```chordgrid" in text
+
+
+def test_analyze_print_uses_the_default_format_too(capsys, recording):
+    cli.main(["analyze", str(recording), "--print"])
+    assert "```chordgrid" in capsys.readouterr().out
+
+
+def test_an_md_output_path_still_means_the_default(tmp_path, recording):
+    # `.md` cannot say which of the two markdown formats is wanted, so it means
+    # the default; `-t md` is how the plain grid is asked for.
+    target = tmp_path / "chart.md"
+    cli.main(["analyze", str(recording), "-o", str(target)])
+    assert "```chordgrid" in target.read_text(encoding="utf-8")
+
+
+def test_t_md_still_gives_the_plain_grid(tmp_path, recording):
+    target = tmp_path / "plain.md"
+    cli.main(["analyze", str(recording), "-o", str(target), "-t", "md"])
+    text = target.read_text(encoding="utf-8")
+    assert "```chordgrid" not in text and "```" in text
+
+

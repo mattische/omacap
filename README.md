@@ -451,7 +451,9 @@ format Obsidian **renders as a chart** rather than showing as text. Move it into
 vault with the [chordgrid plugin](https://github.com/MathieuCGit/ChordGrid_for_Obsidian)
 and it draws itself: bar lines, repeat marks, measure numbers. `-t md` writes an
 aligned grid in a plain code block instead, for reading outside Obsidian, and
-`-t txt` drops Markdown altogether.
+`-t txt` drops Markdown altogether. A `--output` path ending in `.md` means the
+default, since both markdown formats write one; `-t md` is how the plain grid is
+asked for.
 
 ```
 key     E minor (1 sharp)
@@ -481,7 +483,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.10.0"
+omacap: "0.10.1"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -538,7 +540,7 @@ because the file it produces is still Markdown.
 | Option | Meaning |
 | --- | --- |
 | `-o, --output` | chart file to write; only for a single input (default: beside each recording) |
-| `-t, --chart-format` | `chordgrid` (default), `md` or `txt`, or taken from `--output` |
+| `-t, --chart-format` | `chordgrid` (default), `md` for a plain grid, or `txt` |
 | `-c, --chords` | vocabulary: `simple` (default), `standard` or `full` |
 | `--bars-per-line` | bars per line in the grid (default: 4) |
 | `--no-collapse` | write every bar out instead of collapsing repeated phrases |
@@ -584,7 +586,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.10.0"
+omacap: "0.10.1"
 ---
 ````
 

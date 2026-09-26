@@ -46,6 +46,7 @@ from .recorder import (
 )
 from .chart import (
     BARS_PER_LINE,
+    DEFAULT_CHART_FORMAT,
     default_chart_path,
     get_chart_format,
     render,
@@ -261,8 +262,9 @@ def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-t", "--chart-format", default=None, metavar="FMT",
         choices=("md", "txt", "markdown", "text", "chordgrid", "grid", "obsidian"),
-        help="chart format: md, txt, or chordgrid for a block Obsidian renders "
-             "(default: md, or taken from --output)",
+        help="chart format: chordgrid for blocks Obsidian renders as a chart "
+             f"(default), md for a plain grid, or txt "
+             "(default: taken from --output when that names one)",
     )
     parser.add_argument(
         "-c", "--chords", default=DEFAULT_VOCABULARY, metavar="SET",
@@ -503,7 +505,8 @@ def _analyse_recording(path: Path, args: argparse.Namespace, quiet: bool = False
     from .analysis.report import analyse_file
 
     chart_format = (
-        get_chart_format(args.chart_format) if args.chart_format else "md"
+        get_chart_format(args.chart_format) if args.chart_format
+        else DEFAULT_CHART_FORMAT
     )
     if not quiet:
         print("analysing…", flush=True)
@@ -594,7 +597,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     elif args.output:
         chart_format = _chart_format_for(Path(args.output))
     else:
-        chart_format = "md"
+        chart_format = DEFAULT_CHART_FORMAT
 
     failures = 0
     for index, source in enumerate(sources):
@@ -636,10 +639,13 @@ def _load_analysis(source: Path, vocabulary: str):
 
 
 def _chart_format_for(path: Path) -> str:
+    """The format a chart path implies. `.md` is ambiguous - both markdown formats
+    write one - so it means the default rather than the plain grid."""
     try:
-        return get_chart_format(path.suffix)
+        wanted = get_chart_format(path.suffix)
     except ValueError:
-        return "md"
+        return DEFAULT_CHART_FORMAT
+    return DEFAULT_CHART_FORMAT if wanted == "md" else wanted
 
 
 def cmd_update(args: argparse.Namespace) -> int:
@@ -742,7 +748,8 @@ def _analyse_many(paths: list[Path], args: argparse.Namespace) -> int:
     """Chart each piece. One failure must not lose the rest."""
     from .analysis.report import analyse_file
 
-    chart_format = get_chart_format(args.chart_format) if args.chart_format else "md"
+    chart_format = (get_chart_format(args.chart_format) if args.chart_format
+                    else DEFAULT_CHART_FORMAT)
     failures = 0
     print()
     for path in paths:
