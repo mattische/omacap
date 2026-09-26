@@ -11,7 +11,15 @@ from .chords import DEFAULT_VOCABULARY, ChordSpan, decode, get_vocabulary, merge
 from .features import HOP_LENGTH, analyse_spectral, chromagram
 from .key import Key, detect_key_with_chords, diatonic_bonus
 from .meter import Meter, bar_boundaries, detect_meter
-from .rhythm import Rhythm, analyse_rhythm
+from .rhythm import (
+    BAR_SUBDIVISIONS,
+    Rhythm,
+    analyse_rhythm,
+    bar_profile,
+    metrical_weights,
+    syncopation,
+    syncopation_word,
+)
 from .tempo import BeatGrid, analyse_tempo
 
 #: A bar matching this much worse than the song's median is worth a second look.
@@ -61,6 +69,27 @@ class Analysis:
     beat_count: int
     tempo_confidence: float
     rhythm: Rhythm = field(default_factory=Rhythm)
+    syncopation: float = 0.0
+    #: Syncopation per repeated section, keyed by the section's first bar.
+    section_syncopation: dict = field(default_factory=dict)
+
+    @property
+    def syncopation_feel(self) -> str:
+        return syncopation_word(self.syncopation)
+
+    @property
+    def syncopated_sections(self) -> dict:
+        """Sections that reach the level a written syncopation does.
+
+        Averaged over a whole song a syncopated chorus and a straight verse
+        cancel out, which is why this is measured per section. Only sections at
+        or above the anchored threshold are named, so a song that is merely
+        uneven is not called syncopated anywhere.
+        """
+        from .rhythm import SYNCOPATED
+
+        return {bar: score for bar, score in self.section_syncopation.items()
+                if score >= SYNCOPATED}
 
     @property
     def bar_count(self) -> int:
@@ -149,7 +178,7 @@ def analyse_buffer(
     key = detect_key_with_chords(spectral.chroma, merge_adjacent(spans))
     bars = build_bars(grid, meter, spans, duration=buffer.duration)
 
-    return Analysis(
+    analysis = Analysis(
         source=Path(source),
         duration=buffer.duration,
         tempo=grid.bpm,
@@ -161,6 +190,44 @@ def analyse_buffer(
         tempo_confidence=grid.confidence,
         rhythm=analyse_rhythm(spectral.onset, spectral.frame_rate, grid.beats),
     )
+    analysis.syncopation, analysis.section_syncopation = _syncopation(
+        analysis, spectral.onset, spectral.frame_rate
+    )
+    return analysis
+
+
+#: A section shorter than this has too few bars to average a bar profile over.
+MIN_SECTION_BARS = 4
+
+
+def _syncopation(analysis, onset, frame_rate: float):
+    """Syncopation for the whole song, and for each repeated section."""
+    from .structure import find_phrases, label_phrases
+
+    if not analysis.bars:
+        return 0.0, {}
+    positions = max(1, analysis.meter.beats_per_bar) * BAR_SUBDIVISIONS
+    weights = metrical_weights(analysis.meter.beats_per_bar, BAR_SUBDIVISIONS)
+    whole = syncopation(
+        bar_profile(onset, frame_rate, analysis.bars, positions), weights
+    )
+
+    by_number = {bar.number: bar for bar in analysis.bars}
+    sections = {}
+    for phrase in label_phrases(find_phrases(analysis.bars)):
+        if not phrase.repeated:
+            continue
+        # The phrase is written once but played several times; score all of it.
+        first = phrase.bars[0].number
+        played = [by_number[n] for n in
+                  range(first, first + phrase.length * phrase.repeats)
+                  if n in by_number]
+        if len(played) < MIN_SECTION_BARS:
+            continue
+        sections[first] = syncopation(
+            bar_profile(onset, frame_rate, played, positions), weights
+        )
+    return float(whole), sections
 
 
 def build_bars(

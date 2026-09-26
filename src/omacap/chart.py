@@ -178,7 +178,8 @@ def _group_rows(rows: list, bars_per_line: int) -> list[Section]:
     return merged
 
 
-def section_heading(section: Section, first: bool, last: bool) -> str:
+def section_heading(section: Section, first: bool, last: bool,
+                    syncopated: set | None = None) -> str:
     """The markdown line written above a section's grid.
 
     The plugin has no notation for a section label, so it goes here. What it says
@@ -187,10 +188,12 @@ def section_heading(section: Section, first: bool, last: bool) -> str:
     """
     where = (f"bar {section.start}" if section.start == section.end
              else f"bars {section.start}\u2013{section.end}")
+    note = (" \u00b7 syncopated" if syncopated and section.start in syncopated
+            else "")
     if section.named:
         played = (f" \u00b7 played {section.repeats} times"
                   if section.repeats > 1 else "")
-        return f"**{section.letter}** \u00b7 {where}{played}"
+        return f"**{section.letter}** \u00b7 {where}{played}{note}"
     # A run belonging to no phrase is named only where its position says what it
     # is: before everything, or after everything.
     if first:
@@ -336,6 +339,7 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
     groups = _group_rows(rows, bars_per_line)
     if len(groups) < 2:
         return grid(rows, numbered=True)
+    syncopated = set(getattr(analysis, "syncopated_sections", {}))
 
     # One block per section, with the label above it in plain markdown. The bar
     # numbers live in the headings, so the blocks do not number their own.
@@ -344,7 +348,8 @@ def chordgrid_lines(analysis, bars_per_line: int = BARS_PER_LINE,
         if index:
             lines.append("")
         lines.append(section_heading(section, first=index == 0,
-                                     last=index == len(groups) - 1))
+                                     last=index == len(groups) - 1,
+                                     syncopated=syncopated))
         lines.append("")
         lines += grid(section.rows, numbered=False)
     return lines
@@ -389,7 +394,22 @@ def summary_rows(analysis) -> list[tuple[str, str]]:
     feel = getattr(analysis, "rhythm", None)
     if feel is not None and feel.feel != "unclear":
         rows.insert(3, ("Feel", feel.description))
+    # Feel is what happens inside a beat; syncopation is what happens across the
+    # bar. They are different questions, so they get different rows.
+    if getattr(analysis, "section_syncopation", None):
+        rows.insert(4 if feel is not None else 3,
+                    ("Syncopation", _syncopation_text(analysis)))
     return rows
+
+
+def _syncopation_text(analysis) -> str:
+    """The song's syncopation, naming the sections that carry it."""
+    word = analysis.syncopation_feel
+    flagged = analysis.syncopated_sections
+    if not flagged:
+        return word
+    where = ", ".join(f"bar {bar}" for bar in sorted(flagged))
+    return f"{word} overall, but syncopated from {where}"
 
 
 FOOTER = (

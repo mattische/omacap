@@ -611,10 +611,17 @@ minor keys, with the key signature), **tempo** in BPM, the **feel** — whether 
 beat is played straight or swung, and where the off-beat sits — the **number of
 bars**, and the **chords in each bar**.
 
-Not detected: **syncopation**. The scoring works - it reads zero for straight
-eighths and high for a displaced downbeat on material written to test it - but
-the bar-level onset profile it needs is not yet trustworthy on real recordings.
-`tools/syncopation_probe.py` has the numbers.
+**Syncopation** is measured too, per song and per section. A note on a weak
+position where the stronger position after it is empty has displaced it, and that
+is what the score counts. Straight eighths score zero - correctly, since every
+off-beat there is followed by a beat that *is* played - and a pattern that
+anticipates the bar line scores high.
+
+It is measured per section because a syncopated chorus and a straight verse
+average each other away: one recording here reads "played straight" over the
+whole song while one of its sections is four times as displaced as the rest. A
+section is only called syncopated when it reaches the level a written-out
+syncopation reaches, so a merely uneven song is not labelled one.
 
 Where a judgement was a close call, the chart says so on the line itself:
 
