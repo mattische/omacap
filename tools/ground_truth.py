@@ -384,15 +384,128 @@ def _root_of(chord: str):
     return NAMES.index(name) if name in NAMES else None
 
 
+# -- per-section metre, measured and rejected -----------------------------
+
+#: Beats in a window. Fewer than eight bars makes a metre guesswork (see
+#: ENOUGH_BARS in chart.py), and eight bars of 4/4 is 32 beats.
+WINDOW_BEATS = 32
+WINDOW_STEP = 4
+
+
+def metre_windows(song: Song, weights=None) -> list:
+    """The metre detected in each sliding window, and what was actually played.
+
+    Detecting the metre per section is the obvious answer to a song that changes
+    metre part-way, and `detect_meter` will happily run on a slice. It does not
+    work: see `--metre-windows` output. The detector weighs accent, harmonic
+    change and kick accumulated over the whole song; over 32 beats there is much
+    less to go on, and 6 wins ties because it is a multiple of both 2 and 3.
+    """
+    import numpy as np
+
+    from omacap.analysis import meter as meter_module
+    from omacap.analysis.audio import AudioBuffer, trim_silence
+    from omacap.analysis.chords import synchronise
+    from omacap.analysis.features import analyse_spectral
+    from omacap.analysis.tempo import analyse_tempo
+
+    audio, truth = render(song)
+    buffer = trim_silence(AudioBuffer(audio, SAMPLE_RATE))
+    spectral = analyse_spectral(np.asarray(buffer.samples), buffer.sample_rate)
+    grid = analyse_tempo(spectral.onset, spectral.frame_rate,
+                         low_onset=spectral.low_onset)
+    beats = np.asarray(grid.beats)
+    if beats.size < WINDOW_BEATS + 1:
+        return []
+    step = float(np.median(np.diff(beats)))
+    edges = np.concatenate([beats, [beats[-1] + step]])
+    beat_chroma = synchronise(spectral.chroma, spectral.frame_rate, edges)
+
+    original = meter_module.CUE_WEIGHTS
+    if weights:
+        meter_module.CUE_WEIGHTS = weights
+    try:
+        found = []
+        for start in range(0, beats.size - WINDOW_BEATS + 1, WINDOW_STEP):
+            detected = meter_module.detect_meter(
+                beats[start:start + WINDOW_BEATS], spectral.onset,
+                spectral.frame_rate, beat_chroma[start:start + WINDOW_BEATS],
+                low_onset=spectral.low_onset,
+            )
+            found.append((start, detected.beats_per_bar))
+    finally:
+        meter_module.CUE_WEIGHTS = original
+
+    # A median filter, because a single odd window is not a metre change.
+    values = [value for _, value in found]
+    smoothed = []
+    for index in range(len(values)):
+        low = max(0, index - 2)
+        high = min(len(values), index + 3)
+        near = values[low:high]
+        smoothed.append(max(set(near), key=near.count))
+
+    rows = []
+    for (start, raw), value in zip(found, smoothed):
+        middle = start + WINDOW_BEATS // 2
+        at = 0
+        played = truth["metres"][0]
+        for section in song.sections:
+            length = len(section.bars) * section.beats_per_bar
+            if at <= middle < at + length:
+                played = section.beats_per_bar
+                break
+            at += length
+        rows.append({"start": start, "raw": raw, "smoothed": value,
+                     "played": played})
+    return rows
+
+
+def report_metre_windows(chosen, weights=None) -> int:
+    print("Metre detected in sliding 32-beat windows, median-filtered.\n"
+          "The question is whether this could drive a per-section metre.\n")
+    print(f"{'song':18}{'played':>9}  {'windowed':<34}{'right':>7}")
+    total = right = 0
+    for song in chosen:
+        rows = metre_windows(song, weights)
+        if not rows:
+            continue
+        hits = sum(r["smoothed"] == r["played"] for r in rows)
+        total += len(rows)
+        right += hits
+        played = "+".join(str(m) for m in dict.fromkeys(
+            s.beats_per_bar for s in song.sections))
+        shape = "".join(str(r["smoothed"]) for r in rows)[:34]
+        print(f"{song.name:18}{played:>9}  {shape:<34}{100 * hits / len(rows):6.0f}%"
+              f"{'  <- changes' if song.changes_metre else ''}")
+    print(f"\n{100 * right / max(1, total):.1f}% of windows right overall.")
+    print("\nNot good enough to segment a song's metre: it would make songs with a\n"
+          "steady metre wrong to fix the two that change. Leaning on the harmonic\n"
+          "cue helps a short window a lot - (0.1, 0.8, 0.1) gives 85% against\n"
+          "76% - and changes nothing for the whole song, where every weighting\n"
+          "scores 8 of 9.")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write", type=Path, metavar="DIR",
                         help="write the audio and the truth instead of scoring")
     parser.add_argument("--chords", default="simple")
     parser.add_argument("--only", help="only songs whose name contains this")
+    parser.add_argument("--metre-windows", action="store_true",
+                        help="detect the metre in sliding windows, to see whether "
+                             "a per-section metre could work (it cannot)")
+    parser.add_argument("--weights", help="cue weights as a,b,c, for the above")
     args = parser.parse_args(argv)
 
     chosen = [s for s in songs() if not args.only or args.only in s.name]
+
+    if args.metre_windows:
+        weights = None
+        if args.weights:
+            weights = tuple(float(part) for part in args.weights.split(","))
+        return report_metre_windows(chosen, weights)
 
     if args.write:
         import wave
