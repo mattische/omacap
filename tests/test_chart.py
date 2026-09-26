@@ -540,3 +540,29 @@ def test_no_field_name_is_a_yaml_boolean(analysis):
              if ":" in line]
     assert names, "expected some fields"
     assert not reserved & {name.lower() for name in names}
+
+
+def test_the_default_format_is_the_one_obsidian_renders(analysis):
+    """A chart nobody can read as a chart is the wrong thing to write by default."""
+    from omacap.chart import CHART_FORMATS, DEFAULT_CHART_FORMAT
+
+    assert DEFAULT_CHART_FORMAT == "chordgrid"
+    assert CHART_FORMATS[0] == DEFAULT_CHART_FORMAT   # what the interface starts on
+    assert "```chordgrid" in render(analysis)
+
+
+def test_the_default_chart_is_still_a_markdown_file(tmp_path, analysis):
+    from omacap.chart import default_chart_path, write_chart
+
+    target = default_chart_path(tmp_path / "take.wav")
+    assert target.suffix == ".md"
+    written = write_chart(analysis, target)
+    assert "```chordgrid" in written.read_text(encoding="utf-8")
+
+
+def test_the_plain_grid_is_still_available(analysis):
+    # -t md keeps the aligned grid with bar numbers down the left, for reading
+    # outside Obsidian.
+    text = render(analysis, "md")
+    assert "```chordgrid" not in text
+    assert "| C" in text

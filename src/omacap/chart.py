@@ -11,8 +11,11 @@ from .chordgrid import bar_source
 #: Bars per line. Four is how lead sheets are normally laid out.
 BARS_PER_LINE = 4
 
-CHART_FORMATS = ("md", "txt", "chordgrid")
-DEFAULT_CHART_FORMAT = "md"
+#: In the order the interface cycles them. `chordgrid` comes first because it is
+#: the only one Obsidian renders as a chart rather than showing as text, which is
+#: what these files are written to be read as.
+CHART_FORMATS = ("chordgrid", "md", "txt")
+DEFAULT_CHART_FORMAT = "chordgrid"
 
 CHART_EXTENSIONS = {"md": ".md", "txt": ".txt", "chordgrid": ".md"}
 

@@ -446,6 +446,13 @@ omacap analyze ~/Music/session/*.flac -c simple
 Each chart is written beside its recording. One file that cannot be analysed does
 not stop the rest; the run only fails if none of them could be.
 
+The chart is a Markdown file containing `chordgrid` blocks, which is the one
+format Obsidian **renders as a chart** rather than showing as text. Move it into a
+vault with the [chordgrid plugin](https://github.com/MathieuCGit/ChordGrid_for_Obsidian)
+and it draws itself: bar lines, repeat marks, measure numbers. `-t md` writes an
+aligned grid in a plain code block instead, for reading outside Obsidian, and
+`-t txt` drops Markdown altogether.
+
 ```
 key     E minor (1 sharp)
 tempo   124 BPM
@@ -454,7 +461,7 @@ bars    139
 chart   /home/you/Recordings/omacap/omacap_2026-09-25_08-52-01.md
 ```
 
-The chart itself, with the summary omacap actually writes:
+The chart itself, which is what omacap actually writes:
 
 ````markdown
 ---
@@ -474,7 +481,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.9.0"
+omacap: "0.10.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -495,24 +502,35 @@ omacap: "0.9.0"
 
 Form: A×3 B×2 C×2 C×2 B×2 A×2 B×2 D×3. A repeated phrase is written once, with
 the number of times to play it.
-A `?` marks a bar the audio matched less well than the rest of the song.
 
+**Intro** · bars 1–5
+
+```chordgrid
+4/4
+
+| G | -1 | -1 | -1 |
+| -1 |
 ```
-  1 | G       | N.C.?   | N.C.?   | N.C.?   |
-  5 | N.C.?   |
-  6 | C       | Em      | D       | D       |
-    | C       | Em      | D       | D       |  A×3
- 30 | D?      |
- 31 | Em      | C       | Am      | C       |
-    | D       | D       | D       | Am      |  B×2
+
+**A** · bars 6–30 · played 3 times
+
+```chordgrid
+4/4
+
+||: C | Em | D | D |
+| C | Em | D | D :||x3
+| D |
 ```
 ````
+
+In a vault with the chordgrid plugin, each of those blocks draws itself as a
+chart. Without the plugin it stays readable as text.
 
 The `?`, the `A×3` and the `Form:` line each have a section of their own below.
 
 In the interactive interface, press **a** after a take to do the same thing, and
-**t** to cycle the chart format: `.md`, `.txt`, then `chordgrid`. The format is
-shown on screen, and chordgrid is named rather than written as an extension
+**t** to cycle the chart format: `chordgrid`, then `.md`, then `.txt`. The format
+is shown on screen, and chordgrid is named rather than written as an extension
 because the file it produces is still Markdown.
 
 ### Analysis options
@@ -520,7 +538,7 @@ because the file it produces is still Markdown.
 | Option | Meaning |
 | --- | --- |
 | `-o, --output` | chart file to write; only for a single input (default: beside each recording) |
-| `-t, --chart-format` | `md`, `txt` or `chordgrid` (default: `md`, or taken from `--output`) |
+| `-t, --chart-format` | `chordgrid` (default), `md` or `txt`, or taken from `--output` |
 | `-c, --chords` | vocabulary: `simple` (default), `standard` or `full` |
 | `--bars-per-line` | bars per line in the grid (default: 4) |
 | `--no-collapse` | write every bar out instead of collapsing repeated phrases |
@@ -566,7 +584,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.9.0"
+omacap: "0.10.0"
 ---
 ````
 

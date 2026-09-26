@@ -98,7 +98,10 @@ def test_the_chart_format_names_work_without_numpy():
         print(" ".join(chart_format_label(f) for f in CHART_FORMATS))
     """)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == ".md .txt chordgrid (.md)", result.stdout
+    # The set, not the order - the order is the interface's business, not this
+    # test's, which is about working with no numpy behind it.
+    assert set(result.stdout.split()) == {".md", ".txt", "chordgrid", "(.md)"}, \
+        result.stdout
 
 
 def test_the_command_line_runs_without_numpy():

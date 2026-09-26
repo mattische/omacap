@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import __version__
-from .chart import chart_format_label
+from .chart import DEFAULT_CHART_FORMAT, chart_format_label
 from .recorder import METER_FLOOR_DB
 
 MIN_WIDTH = 48
@@ -66,7 +66,7 @@ class ViewModel:
     size_bytes: int = 0
     meter_db: float = METER_FLOOR_DB
     next_name: str | None = None
-    chart_format: str = "md"
+    chart_format: str = DEFAULT_CHART_FORMAT
     can_analyse: bool = False
     recordings: list[str] = field(default_factory=list)
     message: str = ""
