@@ -617,7 +617,15 @@ is what the score counts. Straight eighths score zero - correctly, since every
 off-beat there is followed by a beat that *is* played - and a pattern that
 anticipates the bar line scores high.
 
-It is measured per section because a syncopated chorus and a straight verse
+What is **not** written is a rhythm inside the grid. The plugin can notate one,
+but omacap measures onsets over the whole mix, so a drummer playing eighths on
+hi-hats puts energy on every eighth whatever the guitar strums. Over twenty
+sections of six recordings the derived pattern was all eighths or all quarters
+eighteen times, and the other two changed as soon as the threshold moved. A strum
+pattern with rests in it cannot be recovered from a mix where the drums fill the
+rests.
+
+Syncopation is measured per section because a syncopated chorus and a straight verse
 average each other away: one recording here reads "played straight" over the
 whole song while one of its sections is four times as displaced as the rest. A
 section is only called syncopated when it reaches the level a written-out

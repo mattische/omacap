@@ -42,8 +42,23 @@ does not help: kick, snare and hat bands all stay full. It does confirm that the
 kick band alone puts the peak on the downbeat where the full band peaks on the
 backbeat, which is the band meter.py already uses.
 
+WHY NO RHYTHM IS WRITTEN INTO THE CHART. The chordgrid plugin can notate a
+rhythm - C[8 -8 -8 8 -4 -4] - and the obvious next step is to fill that in from
+the bar profile. Measured over twenty sections of six recordings, 18 of them
+produce one of exactly two patterns: all eighths, or all quarters. That is what
+the Feel row already says in words. The two that produce anything else do not
+survive a nudge to the threshold; one gives five different patterns between 0.20
+and 0.45, which is a threshold reading, not a rhythm.
+
+The reason is what the profile is made of. Onset strength is measured over the
+whole mix, so a drummer playing eighths on hi-hats puts energy on every eighth
+whatever the guitar is strumming. What is measurable is the band's composite
+rhythm. A strum pattern with rests in it cannot be recovered, because in the mix
+the drums fill the rests. Run with --patterns to see it.
+
     python tools/syncopation_probe.py                 # the patterns and anchors
     python tools/syncopation_probe.py FILE [FILE...]  # real recordings
+    python tools/syncopation_probe.py --patterns FILE # derived rhythm, swept
 """
 
 from __future__ import annotations
@@ -137,11 +152,81 @@ def recordings(paths: list[Path]) -> int:
     return 0
 
 
+#: Sixteenth lengths the plugin has a single note value for.
+NOTE_VALUES = {1: "16", 2: "8", 3: "8.", 4: "4", 6: "4.", 8: "2", 12: "2.", 16: "1"}
+
+
+def derived_rhythm(profile, floor: float) -> str | None:
+    """The profile as chordgrid note values, or None where none fit.
+
+    Each attack lasts until the next one; the gap before the first is a rest.
+    """
+    total = len(profile)
+    hits = [index for index, value in enumerate(profile) if value >= floor]
+    if not hits:
+        return None
+    lengths = [("rest", hits[0])] if hits[0] else []
+    for position, start in enumerate(hits):
+        following = hits[position + 1] if position + 1 < len(hits) else total
+        lengths.append(("note", following - start))
+    tokens = []
+    for kind, length in lengths:
+        value = NOTE_VALUES.get(length)
+        if value is None:
+            return None
+        tokens.append(("-" if kind == "rest" else "") + value)
+    return " ".join(tokens)
+
+
+def patterns(paths: list[Path]) -> int:
+    """Show the rhythm that would be written, and how far it can be trusted."""
+    import numpy as np
+
+    from omacap.analysis.audio import load_audio, trim_silence
+    from omacap.analysis.features import HOP_LENGTH, onset_strengths
+    from omacap.analysis.report import analyse_file
+    from omacap.analysis.structure import find_phrases, label_phrases
+
+    sweep = (0.20, 0.25, 0.30, 0.35, 0.40, 0.45)
+    for path in paths:
+        analysis = analyse_file(path)
+        buffer = trim_silence(load_audio(path))
+        onset, _ = onset_strengths(np.asarray(buffer.samples), buffer.sample_rate)
+        rate = buffer.sample_rate / HOP_LENGTH
+        positions = analysis.meter.beats_per_bar * BAR_SUBDIVISIONS
+        by_number = {bar.number: bar for bar in analysis.bars}
+        print(f"\n=== {path.stem[:40]}   {analysis.meter.name}")
+        for phrase in label_phrases(find_phrases(analysis.bars)):
+            if not phrase.repeated:
+                continue
+            first = phrase.bars[0].number
+            played = [by_number[n] for n in
+                      range(first, first + phrase.length * phrase.repeats)
+                      if n in by_number]
+            if len(played) < 4:
+                continue
+            profile = bar_profile(onset, rate, played, positions)
+            written = [derived_rhythm(profile, floor) for floor in sweep]
+            stable = len({w for w in written if w}) == 1
+            print(f"  {phrase.letter} bar {first:4}  "
+                  f"{'stable' if stable else 'UNSTABLE'}")
+            for floor, text in zip(sweep, written):
+                print(f"      {floor:.2f}  {text}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("files", nargs="*", type=Path,
                         help="recordings to probe; omit for the synthesised patterns")
+    parser.add_argument("--patterns", action="store_true",
+                        help="show the rhythm that would be written, swept over "
+                             "the threshold it depends on")
     args = parser.parse_args(argv)
+    if args.patterns:
+        if not args.files:
+            parser.error("--patterns needs at least one recording")
+        return patterns(args.files)
     if args.files:
         return recordings(args.files)
     return synthesised()
