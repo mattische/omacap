@@ -35,7 +35,10 @@ and 0.283 for its one repeated section.
 TWO CORRECTIONS this file earned. An earlier version reported the bar profile as
 unusable, peaking 1.75 beats into the bar on MEDS. That was a bug here: the
 analysis trims leading silence and measures bar times from the trimmed audio,
-while this loaded the untrimmed file - 3.4 seconds out, nearly two bars. The same
+while this loaded the untrimmed file. On MEDS the leading silence is 0.35 s -
+about three sixteenths, which is all it takes to move the profile a whole
+position. (An earlier note here said 3.4 s: that is the total silence, lead plus
+tail, and only the lead shifts anything.) The same
 bug understated bass_probe.py by five to eight points. Multi-band onset was then
 tried against the dense-material problem, which is what it was proposed for, and
 does not help: kick, snare and hat bands all stay full. It does confirm that the

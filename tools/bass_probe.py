@@ -36,8 +36,8 @@ target, since a bass legitimately leaves the root:
     Cabrillos                34%    errors smeared across every interval
 
 (An earlier version of this file reported 78/73/58/35/26%. Those were measured
-against untrimmed audio while the bar times come from the trimmed analysis - 3.4
-seconds out on MEDS. The numbers above are with that fixed; the picture is the
+against untrimmed audio while the bar times come from the trimmed analysis, which
+on MEDS is 0.35 s of leading silence. The numbers above are with that fixed; the picture is the
 same but it was understated by five to eight points.)
 
 On the three studio mixes this is a working tracker. On the other two it is not,

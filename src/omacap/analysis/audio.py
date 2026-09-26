@@ -24,6 +24,10 @@ class AudioBuffer:
 
     samples: object  # numpy.ndarray of float32
     sample_rate: int
+    #: Where this buffer starts in the file it came from. Trimming silence moves
+    #: it, and anything that has to line up with the original audio - a player,
+    #: a metronome - needs to know by how much.
+    start: float = 0.0
 
     @property
     def duration(self) -> float:
@@ -88,4 +92,8 @@ def trim_silence(buffer: AudioBuffer, threshold_db: float = -50.0) -> AudioBuffe
         return buffer
     start = int(loud[0]) * window
     end = min(samples.size, (int(loud[-1]) + 1) * window)
-    return AudioBuffer(samples=samples[start:end], sample_rate=buffer.sample_rate)
+    return AudioBuffer(
+        samples=samples[start:end],
+        sample_rate=buffer.sample_rate,
+        start=buffer.start + start / buffer.sample_rate,
+    )

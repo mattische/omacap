@@ -621,3 +621,14 @@ def test_a_long_enough_song_is_not_warned_about(analysis):
 
     assert analysis.bar_count >= ENOUGH_BARS
     assert "too few" not in dict(summary_rows(analysis))["Time signature"]
+
+
+def test_frontmatter_says_where_the_music_starts(analysis):
+    """A metronome has to start with the music, not with the file."""
+    from omacap.chart import frontmatter_lines
+
+    fields = dict(line.split(": ", 1) for line in frontmatter_lines(analysis)
+                  if ": " in line)
+    assert "audio_start" in fields
+    assert float(fields["audio_start"]) >= 0.0
+    assert fields["beats_per_bar"] == str(analysis.meter.beats_per_bar)

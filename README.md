@@ -492,6 +492,8 @@ tempo: 124
 time_signature: "4/4"
 bars: 139
 length: "4:30"
+audio_start: 0.349
+beats_per_bar: 4
 feel: "straight eighths"
 syncopation: "played straight"
 chords: ["D", "C", "Em", "Am", "G", "A", "Bm"]
@@ -499,7 +501,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.12.0"
+omacap: "0.13.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -599,6 +601,8 @@ tempo: 124
 time_signature: "4/4"
 bars: 139
 length: "4:30"
+audio_start: 0.349
+beats_per_bar: 4
 feel: "straight eighths"
 syncopation: "played straight"
 chords: ["D", "C", "Em", "Am", "G", "A", "Bm"]
@@ -606,9 +610,16 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.12.0"
+omacap: "0.13.0"
 ---
 ````
+
+`audio_start` is where the music begins in the file, in seconds — a recording
+usually opens with a moment of silence before playback did, and every bar number
+here is measured from the music, not from the file. Anything lining up with the
+original audio needs it: a metronome starting at zero is early by exactly that
+much for the whole song. Measured over the recordings here it ranged from 0.04 s
+to 1.39 s.
 
 Nothing in it changes between runs, on purpose: re-analysing a recording should
 not produce a file that differs only by a timestamp, because these live in a

@@ -69,6 +69,9 @@ class Analysis:
     beat_count: int
     tempo_confidence: float
     rhythm: Rhythm = field(default_factory=Rhythm)
+    #: Where the music starts in the file, in seconds. Everything else here is
+    #: measured from that point, not from the start of the file.
+    audio_start: float = 0.0
     syncopation: float = 0.0
     #: Syncopation per repeated section, keyed by the section's first bar.
     section_syncopation: dict = field(default_factory=dict)
@@ -188,6 +191,7 @@ def analyse_buffer(
         chords=merge_adjacent(spans),
         beat_count=len(grid),
         tempo_confidence=grid.confidence,
+        audio_start=buffer.start,
         rhythm=analyse_rhythm(spectral.onset, spectral.frame_rate, grid.beats),
     )
     analysis.syncopation, analysis.section_syncopation = _syncopation(

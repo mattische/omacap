@@ -409,6 +409,10 @@ def frontmatter_lines(analysis) -> list[str]:
         ("time_signature", yaml_scalar(analysis.meter.name)),
         ("bars", yaml_scalar(analysis.bar_count)),
         ("length", yaml_scalar(format_clock(analysis.duration))),
+        # Where the music starts in the file. A metronome has to begin here, not
+        # at zero, or it is wrong by however much silence the file opens with.
+        ("audio_start", yaml_scalar(round(getattr(analysis, "audio_start", 0.0), 3))),
+        ("beats_per_bar", yaml_scalar(analysis.meter.beats_per_bar)),
     ]
 
     feel = getattr(analysis, "rhythm", None)

@@ -286,3 +286,30 @@ def test_too_few_bars_to_judge_marks_nothing():
                       meter=Meter(4, 0, "4/4", 1.0), key=Key(0, "major", 0.9, 0.9),
                       bars=bars, chords=[], beat_count=4, tempo_confidence=1.0)
     assert result.uncertain_bars == set()
+
+
+def test_trimming_records_where_the_music_starts():
+    """Everything the analysis reports is measured from the music, not the file.
+
+    Anything lining up with the original audio - a player, a metronome - needs to
+    know by how much, and it used to be thrown away.
+    """
+    import numpy as np
+
+    from omacap.analysis.audio import AudioBuffer, trim_silence
+
+    audio = song(FOUR, bars=12)
+    silence = np.zeros(int(1.5 * SR), dtype=audio.dtype)
+    padded = AudioBuffer(np.concatenate([silence, audio]), SR)
+    assert padded.start == 0.0
+
+    trimmed = trim_silence(padded)
+    assert trimmed.start == pytest.approx(1.5, abs=0.05)
+
+    result = analyse_buffer(trimmed, Path("Padded.wav"))
+    assert result.audio_start == pytest.approx(1.5, abs=0.05)
+
+
+def test_a_file_with_no_leading_silence_starts_at_zero():
+    result = analyse(bars=12)
+    assert result.audio_start == pytest.approx(0.0, abs=0.2)
