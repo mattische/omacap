@@ -201,6 +201,26 @@ def build_output_path(
     return candidate
 
 
+def rename_recording(path: Path, basename: str) -> Path:
+    """Rename a finished recording to ``basename``, keeping its extension.
+
+    Returns the new path, or the old one if the rename could not be done - a
+    recording that exists under the wrong name is worth more than an error.
+    """
+    stem = sanitize_basename(basename)
+    if not stem or stem == path.stem:
+        return path
+    target = path.with_name(f"{stem}{path.suffix}")
+    counter = 2
+    while target.exists() and target != path:
+        target = path.with_name(f"{stem}_{counter}{path.suffix}")
+        counter += 1
+    try:
+        return path.rename(target)
+    except OSError:
+        return path
+
+
 #: Punctuation kept in a filename. Track titles are full of brackets, ampersands
 #: and apostrophes - "Kärlek & Kaos", "Sång nr. 3 [Live]", "What's Going On" - and
 #: replacing those with underscores makes a chart folder unreadable. Everything

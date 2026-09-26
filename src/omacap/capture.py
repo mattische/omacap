@@ -110,6 +110,19 @@ class TrackSession:
         return self.watcher.tracks if self.watcher is not None else []
 
     @property
+    def only_track(self):
+        """The one track this capture heard, or None if it heard none or several.
+
+        A single file named after one of two tracks would be wrong, and a capture
+        of several is what splitting is for.
+        """
+        tracks = [c.track for c in self.changes if not c.track.is_advert]
+        if not tracks:
+            return None
+        first = tracks[0]
+        return first if all(t.identity == first.identity for t in tracks) else None
+
+    @property
     def track_count(self) -> int:
         return len({c.track.identity for c in self.changes})
 

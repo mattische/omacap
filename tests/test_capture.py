@@ -260,3 +260,89 @@ def test_a_browser_playlist_is_still_several_tracks():
     )
     assert named is True
     assert [s.basename() for s in segments] == ["01 - Band - One", "02 - Band - Two"]
+
+
+# -- naming a single recording -------------------------------------------
+
+def test_one_track_for_the_whole_capture_names_the_file():
+    from omacap import capture, nowplaying
+
+    track = nowplaying.Track(trackid="/t/1", title="Reser bort", artist="Trampe")
+
+    class Watcher:
+        tracks = [nowplaying.TrackChange(at=0.0, track=track)]
+
+    session = capture.TrackSession.__new__(capture.TrackSession)
+    session.watcher = Watcher()
+    assert session.only_track is track
+    assert track.basename == "Trampe - Reser bort"
+
+
+def test_several_tracks_name_nothing():
+    """A single file called after one of two tracks would be wrong."""
+    from omacap import capture, nowplaying
+
+    first = nowplaying.Track(trackid="/t/1", title="One", artist="A")
+    second = nowplaying.Track(trackid="/t/2", title="Two", artist="B")
+
+    class Watcher:
+        tracks = [nowplaying.TrackChange(at=0.0, track=first),
+                  nowplaying.TrackChange(at=9.0, track=second)]
+
+    session = capture.TrackSession.__new__(capture.TrackSession)
+    session.watcher = Watcher()
+    assert session.only_track is None
+
+
+def test_no_player_names_nothing():
+    from omacap import capture
+
+    session = capture.TrackSession.__new__(capture.TrackSession)
+    session.watcher = None
+    assert session.only_track is None
+
+
+def test_an_advert_is_not_a_track_to_name_a_file_after():
+    from omacap import capture, nowplaying
+
+    advert = nowplaying.Track(trackid="/com/spotify/ad/1", title="Advertisement")
+
+    class Watcher:
+        tracks = [nowplaying.TrackChange(at=0.0, track=advert)]
+
+    session = capture.TrackSession.__new__(capture.TrackSession)
+    session.watcher = Watcher()
+    assert session.only_track is None
+
+
+def test_renaming_keeps_the_extension_and_avoids_collisions(tmp_path):
+    from omacap.recorder import rename_recording
+
+    first = tmp_path / "omacap_2026-09-26_14-08-33.mp3"
+    first.write_bytes(b"one")
+    renamed = rename_recording(first, "Trampe - Reser bort")
+    assert renamed.name == "Trampe - Reser bort.mp3"
+    assert renamed.read_bytes() == b"one"
+
+    second = tmp_path / "omacap_2026-09-26_14-09-00.mp3"
+    second.write_bytes(b"two")
+    again = rename_recording(second, "Trampe - Reser bort")
+    assert again.name == "Trampe - Reser bort_2.mp3"
+    assert renamed.read_bytes() == b"one"
+
+
+def test_renaming_sanitises_a_title(tmp_path):
+    from omacap.recorder import rename_recording
+
+    path = tmp_path / "take.wav"
+    path.write_bytes(b"x")
+    renamed = rename_recording(path, "A/B: title?")
+    assert "/" not in renamed.name and renamed.suffix == ".wav"
+
+
+def test_renaming_to_the_same_name_is_a_no_op(tmp_path):
+    from omacap.recorder import rename_recording
+
+    path = tmp_path / "Trampe - Reser bort.mp3"
+    path.write_bytes(b"x")
+    assert rename_recording(path, "Trampe - Reser bort") == path

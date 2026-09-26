@@ -289,6 +289,22 @@ If the analysis fails the recording is still saved; only the chart is lost.
 `omacap record` stops cleanly on `Ctrl-C` (or `SIGTERM`) and always finalises the
 file, so containers such as `.m4a` stay playable.
 
+### Files are named after what was playing
+
+`omacap_2026-09-26_14-08-33.mp3` says nothing about the music. When the media
+player reported **one** track for the whole take, the file is renamed after it:
+
+```
+saved   /home/you/Recordings/omacap/trampe|strandberg - Reser bort, kommer hem.mp3 (0:16, 366 KB)
+named   after trampe|strandberg – Reser bort, kommer hem
+```
+
+This works for a part of a song as much as a whole one — it is the track the
+player says is loaded, not a guess from the audio. Several tracks in one take are
+left with the timestamp, because a single file named after one of them would be
+wrong; that is what `--split` is for. `-n NAME` always wins, and a take with no
+player to ask keeps the timestamp.
+
 ### Other commands
 
 ```bash
@@ -483,7 +499,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.11.0"
+omacap: "0.12.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -590,7 +606,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.11.0"
+omacap: "0.12.0"
 ---
 ````
 
@@ -751,6 +767,18 @@ A key and its relative minor share every note, so when the evidence cannot separ
 them both are named rather than one being asserted. And a time signature chosen on a
 thin margin is worth knowing about, because the bar grouping is built on it: if it is
 wrong, every bar is, however good the chords are.
+
+A chart built on very few bars says that too:
+
+```
+| **Time signature** | 7/8 — read from only 2 bars, too few to rely on |
+```
+
+Confidence is the margin over the runner-up, which says nothing about whether
+there was enough music to compare. The metre is decided by testing candidate
+groupings across the song, so a handful of bars can produce a confident answer
+that means nothing. Fifteen seconds is not enough; give it a minute of steady
+playing.
 
 Every chart also carries a confidence line — `key high, tempo high, time signature
 low` — because some of this is genuinely ambiguous:

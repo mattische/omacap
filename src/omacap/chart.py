@@ -60,6 +60,11 @@ UNCERTAIN_MARK = "?"
 #: How many uncertain bars to name before summarising the rest as a count.
 MAX_NAMED_BARS = 12
 
+#: Below this many bars, the metre is guesswork however wide the winning margin.
+#: The detector compares candidate groupings across the song; with a handful of
+#: bars there is almost nothing to compare, and it still reports high confidence.
+ENOUGH_BARS = 8
+
 
 def bar_text(bar, uncertain: set[int]) -> str:
     """A bar's chords, marked when the match was weaker than the song's usual."""
@@ -440,7 +445,13 @@ def summary_rows(analysis) -> list[tuple[str, str]]:
         key_text += f" \u2014 or {key.relative.name}, its relative"
 
     meter_text = meter.name
-    if meter.confidence < CERTAIN:
+    if analysis.bar_count < ENOUGH_BARS:
+        # Confidence is the margin over the runner-up, which says nothing about
+        # whether there was enough music to compare. A metre read off a handful of
+        # bars can be confident and still meaningless.
+        meter_text += (f" \u2014 read from only {analysis.bar_count} bars, too few "
+                       f"to rely on")
+    elif meter.confidence < CERTAIN:
         meter_text += " \u2014 a close call, so the bars may be grouped wrongly"
 
     rows = [

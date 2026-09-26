@@ -10,6 +10,7 @@ import sys
 import termios
 import time
 import tty
+from dataclasses import replace
 from pathlib import Path
 
 from . import capture, ui
@@ -30,6 +31,7 @@ from .recorder import (
     RecorderConfig,
     RecorderError,
     build_output_path,
+    rename_recording,
     default_output_dir,
     ensure_ffmpeg,
     sanitize_basename,
@@ -199,8 +201,16 @@ class TuiApp:
         # whatever the duration is when asked.
         silences = recorder.silences
         changes = self.session.changes if self.session is not None else []
+        only_track = self.session.only_track if self.session is not None else None
         result = self.session.stop() if self.session is not None else recorder.stop()
         self.session = None
+
+        # Name the file after the track when the player reported just one, unless
+        # a name was typed for it. See cmd_record.
+        if only_track is not None and not self.next_name and not recorder.error:
+            renamed = rename_recording(result.path, only_track.basename)
+            if renamed != result.path:
+                result = replace(result, path=renamed)
         self.meter_db = METER_FLOOR_DB
         if recorder.error:
             self.notify(recorder.error, "error")

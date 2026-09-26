@@ -8,6 +8,7 @@ import signal
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
@@ -39,6 +40,7 @@ from .recorder import (
     RecorderError,
     available_encoders,
     build_output_path,
+    rename_recording,
     ensure_format,
     default_output_dir,
     format_is_available,
@@ -458,6 +460,19 @@ def cmd_record(args: argparse.Namespace) -> int:
     if recorder.error:
         print(f"omacap: {recorder.error}", file=sys.stderr)
         return 1
+
+    # A file called omacap_2026-09-26_14-08-33 says nothing. When the player
+    # reported one track for the whole capture, name it after that instead. An
+    # explicit --name always wins.
+    if not args.name:
+        track = session.only_track
+        if track is not None:
+            renamed = rename_recording(result.path, track.basename)
+            if renamed != result.path:
+                result = replace(result, path=renamed)
+                if not args.quiet:
+                    print(f"named   after {track.label}")
+
     if args.quiet:
         print(result.path)
     else:

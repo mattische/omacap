@@ -74,13 +74,16 @@ class Track:
             return f"{self.artist} – {self.title}"
         return self.title or self.trackid or "unknown"
 
-    def filename(self, index: int) -> str:
-        """The basename for this track's file, numbered by its place in the capture."""
-        parts = [f"{index:02d}"]
-        if self.artist:
-            parts.append(self.artist)
+    @property
+    def basename(self) -> str:
+        """What to call a file holding just this track, with no number."""
+        parts = [self.artist] if self.artist else []
         parts.append(self.title or "untitled")
         return " - ".join(parts)
+
+    def filename(self, index: int) -> str:
+        """The basename for this track's file, numbered by its place in the capture."""
+        return f"{index:02d} - {self.basename}"
 
 
 def available() -> bool:

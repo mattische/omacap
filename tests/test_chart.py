@@ -189,7 +189,7 @@ def test_writing_plain_text(analysis, tmp_path):
 class _Stub:
     """Enough of an Analysis to render the summary."""
 
-    def __init__(self, key_conf=1.0, meter_conf=1.0):
+    def __init__(self, key_conf=1.0, meter_conf=1.0, bars=32):
         from omacap.analysis.key import Key
         from omacap.analysis.meter import Meter
 
@@ -197,8 +197,9 @@ class _Stub:
         self.meter = Meter(4, 0, "4/4", meter_conf)
         self.tempo = 120.0
         self.duration = 60.0
-        self.bars = []
-        self.bar_count = 0
+        # Enough bars that the too-few warning is not what is under test here.
+        self.bars = [object()] * bars
+        self.bar_count = bars
         self.tempo_confidence = 1.0
         self.source = Path("take.wav")
         self.chord_vocabulary = []
@@ -594,3 +595,29 @@ def test_a_single_block_chart_opens_with_them_too(analysis):
     lines = chordgrid_lines(analysis, sections=False)
     assert lines[0] == "```chordgrid"
     assert lines[1] == "show% measure-num count"
+
+
+def test_a_metre_read_from_too_few_bars_says_so():
+    """Confidence is a margin over the runner-up, not a measure of evidence.
+
+    A metre read off two bars can report high confidence and mean nothing, which
+    is exactly what a short recording produced.
+    """
+    from omacap.chart import ENOUGH_BARS
+
+    text = dict(summary_rows(_Stub(meter_conf=1.0, bars=2)))["Time signature"]
+    assert "2 bars" in text and "too few" in text
+    assert ENOUGH_BARS > 2
+
+
+def test_too_few_bars_is_said_instead_of_the_close_call(_=None):
+    # Both would be true at once; the missing evidence is the more useful thing.
+    text = dict(summary_rows(_Stub(meter_conf=0.1, bars=2)))["Time signature"]
+    assert "too few" in text and "grouped wrongly" not in text
+
+
+def test_a_long_enough_song_is_not_warned_about(analysis):
+    from omacap.chart import ENOUGH_BARS, summary_rows
+
+    assert analysis.bar_count >= ENOUGH_BARS
+    assert "too few" not in dict(summary_rows(analysis))["Time signature"]
