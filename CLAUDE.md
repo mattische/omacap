@@ -16,15 +16,21 @@ bar count and the chords in each bar, written out as a chord chart.
 
 ## Status
 
-Both planned stages are finished, tested and pushed.
+All planned stages are finished, tested and pushed.
 
 - **Stage 1 — recording.** TUI and CLI, six output formats, live peak meter.
 - **Stage 2 — musical analysis.** `omacap analyze`, `record --analyze`, `a` in
   the TUI, and a y/n question offered as soon as a take is saved.
+- **Stage 3 — playing along.** `omacap play` serves a page that plays the
+  recording with its chords, beat by beat, and lets the chords be corrected while
+  listening; `analyze --play-along` writes the same page to disk, read-only.
+  Corrections live in `<song>.chords.json` and win over every later analysis, and
+  a chart edited by hand in Obsidian is read back rather than overwritten.
+- **Track splitting.** `omacap split` and `record --split`, named from MPRIS.
 - **Distribution.** `install.sh` for a one-line install, `omacap update` to
   update in place, and a cached background update check that posts a notice.
 
-466 tests pass (`pytest`). Nothing is known to be broken.
+941 tests pass (`pytest`). Nothing is known to be broken.
 
 ## Design decisions that matter
 
@@ -64,6 +70,32 @@ to discard.
 runs *is* the checkout, so `omacap update` is a `git pull` plus a reinstall for
 entry points and dependencies, and `find_installation()` can locate the checkout
 by walking up from the imported package.
+
+**A correction always wins.** The analysis is an estimate and the person listening
+is the authority. `corrections.apply()` lays `<song>.chords.json` over every
+analysis - `analyze`, `record -A`, `split -A` and `play` all go through
+`cli._write_chart` - so a better analysis later fills in only the bars nobody
+touched. A correction stores its bar's start time as well as its number and is
+matched by time, because a newer analysis can find a bar more at the start and
+renumber everything after it.
+
+**A hand-edited chart is never overwritten.** omacap fingerprints each chart it
+writes (`~/.cache/omacap/charts.json`, keyed by resolved path). A chart that does
+not match its fingerprint was edited: a chordgrid chart is read back with
+`corrections.read_chart()` and the changed bars become corrections; one that
+cannot be read back (repeat mark broken, bars added, metre changed) is **left
+alone** and the reason is shown in the terminal and on the page. Same rule as
+`apply_update()` and a dirty checkout. A chart with no fingerprint is treated as
+possibly edited, so every difference from what would be written now is kept -
+safe for the user's work, at the cost of freezing an older analysis's output if
+the cache is lost.
+
+**The play page is served, not opened from disk, when it edits.** A `file://` page
+cannot write files, so `playserver.py` serves it on 127.0.0.1 with stdlib
+`http.server`. Writes need an `X-Omacap-Token` header carrying a token that is only
+in the page; another site in the browser cannot set a custom header cross-origin
+without a CORS preflight, which the server never answers. Audio is served with
+Range support, or a click on a beat restarts the song instead of seeking.
 
 **Analysis is numpy-only by choice.** librosa would have been faster to write but
 pulls in ~24 packages (numba, llvmlite, scikit-learn). The DSP here is a few
@@ -162,6 +194,12 @@ Worth knowing so they are not reintroduced:
   saw a browser playlist as a single endless track. A track is identified by
   `(trackid, title, artist)`. Spotify's desktop client does move the id, which is
   why this went unnoticed until the same playlist was played in a browser.
+- **A repeat written once is not an edit.** `find_phrases()` collapses bars on
+  their chord *names*, so two bars `C G` with the change on beat 3 and on beat 4
+  are one phrase, written the way the first one sounds. Reading a chart back and
+  comparing it with the analysis bar by bar therefore saw the second as edited -
+  it reported a hand edit on a chart nobody had touched. `edited_bars()` compares
+  with the chart as it *would be written now*, cell by cell, instead.
 
 ## About the real-chart ground truth
 
@@ -201,6 +239,28 @@ best-over-runner-up ratio killed it: correct synthetic 3/4 scores 1.13 and corre
 threshold separates them, so the rule would trade working 3/4 and 6/8 detection for
 a 4/4 bias. The metre is instead reported as a close call, which cannot make the
 detection worse.
+
+**Open-source ML models instead of omacap's own DSP** (measured 2026-11-13 on the
+three charted songs, agreement / longest loop; omacap is 94/24, 84/48, 95/12, key
+3/3). None beats it for a reason grounded in the audio:
+
+- **madmom chords** (DeepChroma, and CNN+CRF): mean agreement 89% and 92%, but the
+  longest loop is shorter on every song (16-17 / 33-38 / 8-12). They use fewer
+  distinct chords, which the anywhere-in-the-chart measure rewards whether or not
+  the chord is in the right bar. Key 2/3: MEDS called G major. CRF takes ~6 min a
+  song; the models are CC BY-NC-SA.
+- **Beat This!** as the bar grid: halved the tempo on 2 of 3 (91 and 61 BPM) and
+  is 5-20 times slower. omacap's grid was already right on all three.
+- **Demucs stems before omacap's analysis**: chords from the mix without drums
+  reach 95% mean agreement, but 19 of the 28 bars that changed went from `N.C.` to
+  a chord, mostly in intros the band's charts mark as rests, and MEDS's intro
+  gains C#, G and Gm, which are not in the song. Loops do not move. Without drums
+  the tempo halves (the kick carries the octave), and the bass stem agrees with
+  the chord root *less* than the full mix (37% against 65% on So Gung Ho).
+  Separation costs about real time on 16 cores and ~1.7 GB on disk.
+
+Stems are still worth having for *practice* - muting the guitar to play it - which
+is where they are listed under taking it further.
 
 ## Chroma ideas that were tried and did not help
 
@@ -274,7 +334,7 @@ practically unreadable.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest                              # 407 tests, ~17s, no sound card needed
+pytest                              # 941 tests, ~1-2 min, no sound card needed
 python tools/live_check.py          # real audio through the real sound card
 ```
 
@@ -315,6 +375,11 @@ src/omacap/
   devices.py      pactl: monitor source discovery
   formats.py      output formats and their encoder arguments
   chart.py        chord chart rendering (markdown and plain text)
+  chordgrid.py    one bar in the chordgrid plugin's grammar
+  corrections.py  user corrections: parsing a bar, reading a chart back, the
+                  sidecar file, never overwriting a hand edit
+  player.py       the play-along page: data and the self-contained HTML
+  playserver.py   `omacap play`: serves the page and takes corrections
   updater.py      update detection, the cached check, and applying an update
   analysis/
     audio.py      decode to mono float32 via ffmpeg; silence trimming
@@ -348,15 +413,17 @@ belongs in `tui.py`.
 
 ## If you want to take it further
 
-**Splitting a playlist capture into one file per track** is planned in detail in
-[docs/track-splitting-plan.md](docs/track-splitting-plan.md): read what the player
-reports over MPRIS, cut the capture on track changes, name each file after its
-track and chart each one. The plan records what was already measured (silence
-thresholds, `busctl --json` polling cost, the FLAC stream-copy header bug, a
-`sanitize_basename()` bug that mangles ordinary track titles) so none of it has to
-be re-derived, and it phases the work so the one unmeasured risk is settled first.
+**Stems for practice.** Agreed next step for the play page: an optional
+`omacap[stems]` extra running Demucs once per song, and a mute/volume control per
+stem on the page, so a player can drop their own part. Not for analysis - that
+was measured and does not help (see above). Separation takes about the length of
+the song on CPU.
 
-The rest are smaller and unplanned.
+**Key after corrections.** The key is detected once, before corrections are laid
+over; a person who fixes many bars may have changed what the key should be.
+
+Track splitting, once planned in [docs/track-splitting-plan.md](docs/track-splitting-plan.md),
+is built. The rest are smaller and unplanned.
 
 - **Song sections.** Repeated chord patterns are already visible in the charts;
   detecting and labelling them (verse, chorus) would shorten a 139-bar chart a

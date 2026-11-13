@@ -328,6 +328,7 @@ omacap devices     # list capture sources, with the default marked *
 omacap formats     # list output formats
 omacap doctor      # check the installation
 omacap update      # update to the latest version
+omacap play song.mp3   # play along with the chords, and correct them
 ```
 
 ### What is playing
@@ -517,7 +518,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.16.0"
+omacap: "0.17.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -585,6 +586,7 @@ because the file it produces is still Markdown.
 | `--no-sections` | one chordgrid block for the whole song, not one per section |
 | `--no-frontmatter` | leave the YAML properties block out of a markdown chart |
 | `-p, --print` | print the chart instead of writing a file |
+| `--play-along` | also write a page beside the recording that plays it with its chords — see [Playing along](#playing-along-and-correcting-the-chords) |
 
 The chord vocabulary is the setting worth knowing about:
 
@@ -626,7 +628,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.16.0"
+omacap: "0.17.0"
 ---
 ````
 
@@ -755,6 +757,91 @@ because the plugin has no notation for a section label:
 The letters say which parts are the same as each other. They are **not** named
 "verse" and "chorus": that was tried and does not survive contact with real
 songs - see `CLAUDE.md`. `--no-sections` writes one grid for the whole song.
+
+### Playing along, and correcting the chords
+
+```bash
+omacap play song.mp3
+omacap play song.mp3 --chart "~/Vault/Songs/Song - omacap.md"
+```
+
+`omacap play` analyses the recording, writes its chart as `analyze` would, and
+opens a page in the browser that plays the song with its chords, four bars to a
+row and one grey box per beat. The chord sits in the box it starts on, so a
+change on the last beat looks like one. The bar and the beat being played light
+up as the song runs.
+
+| On the page | |
+| --- | --- |
+| click a beat | play from that beat |
+| **beats** / **note values** | show a bar as beat boxes, or as the chart writes it: `D[2.] G[4]` |
+| **Speed** | 50–100%, without changing the pitch |
+| **follow** | keep the bar being played on screen |
+| **Loop** | loop one of the sections the analysis found (A, B…), or any run of bars |
+| double-click a bar | correct it — see below |
+
+The page is served from `127.0.0.1` only, for as long as the command runs;
+Ctrl+C stops it. `--port` picks the port and `--no-browser` prints the address
+instead of opening it. Every [analysis option](#analysis-options) works here too.
+
+**Correcting a chord.** The analysis is an estimate and you are the one
+listening, so a correction always wins. Double-click a bar, type what is played
+and press Enter. Any of these work:
+
+| Written | Means |
+| --- | --- |
+| `C` | C for the whole bar |
+| `C / G` | split evenly, half each in 4/4 |
+| `D · · G` | a chord or `·` per beat: D for three, G on the fourth (`.` works too) |
+| `D[2.] G[4]` | note values, as in the chart |
+| `-1`, `N.C.` | no chord |
+| `%` | the same as the bar before |
+| *(empty)* | back to what omacap heard |
+
+Tick **correct every bar written the same** to fix every bar that reads like
+this one at once - a chorus that comes back four times, say. A bar that does not
+add up, such as three chords split evenly in 4/4, is refused with a reason rather
+than guessed at. A corrected bar is marked ✎ and never gets a `?`.
+
+A correction is saved the moment you press Enter, in two places:
+
+| File | |
+| --- | --- |
+| `song.chords.json`, beside the recording | your corrections, bar by bar. Created by the first one; travels with the song |
+| the chart (`song.md`, or the `--chart` file) | rewritten straight away with the correction in it |
+
+The recording itself, and any other chart, are never touched.
+
+**Corrections survive a new analysis.** `omacap analyze`, `record --analyze`,
+`split --analyze` and `play` all lay `song.chords.json` over what they detect:
+the analysis fills in the bars you left alone, and yours win. A correction
+follows its bar by time, so it lands in the right place even if a newer analysis
+numbers the bars differently. Delete the file to go back to the analysis alone.
+
+**Editing the chart by hand works too.** Change a bar in Obsidian, and the next
+time omacap writes that chart - on the next correction, a page reload, or a new
+`analyze` - it notices the file is not what it wrote, reads your changed bars back
+into `song.chords.json`, and keeps them. Reload the page to see them there. If
+the chart was edited in a way that cannot be read back (a repeat mark removed,
+bars added or taken away, a different time signature), **omacap leaves the chart
+as it is** rather than overwrite your work, and says so in the terminal and at
+the top of the page. Your corrections are still saved; put the chart right, or
+delete it to have it written afresh.
+
+Reading back works for `chordgrid` charts, the default. A hand-edited `md` or
+`txt` chart that omacap wrote is not overwritten either, but its changes are not
+read back.
+
+To tell a hand edit from its own output, omacap keeps a fingerprint of each chart
+it writes in `~/.cache/omacap/charts.json`. A chart it has no fingerprint for -
+one written before this feature existed, or on another machine - is compared with
+what it would write now, and every difference is kept as a correction. The
+terminal says how many bars were kept; delete `song.chords.json` if they were not
+yours.
+
+**A page to keep.** `omacap analyze --play-along song.mp3` writes the same page
+as `song.html` beside the recording. Open it from disk with no server running:
+everything but correcting works.
 
 ### What it can and cannot do
 

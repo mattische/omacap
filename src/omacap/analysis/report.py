@@ -45,6 +45,7 @@ class Bar:
     end: float
     chords: list[str] = field(default_factory=list)
     strength: float = 0.0        # how well the audio matched what was written
+    corrected: bool = False      # written by a person, not by the analysis
 
     @property
     def duration(self) -> float:
@@ -113,7 +114,7 @@ class Analysis:
         threshold = float(np.median(strengths)) * UNCERTAIN_FRACTION
         return {
             bar.number for bar in self.bars
-            if 0 < bar.strength <= threshold or bar.strength == 0
+            if not bar.corrected and (0 < bar.strength <= threshold or bar.strength == 0)
         }
 
     @property

@@ -67,6 +67,7 @@ examples:
   omacap doctor                 check that everything needed is installed
   omacap analyze song.mp3       write a chord chart next to the recording
   omacap record -d 60 -A        record a minute, then chart it straight away
+  omacap play song.mp3          play it with its chords, and correct them
   omacap update                 install the latest version
   omacap nowplaying             show what the media player is playing
   omacap split mix.wav          cut a recording into one file per track
@@ -178,6 +179,26 @@ def build_parser() -> argparse.ArgumentParser:
         "-p", "--print", dest="to_stdout", action="store_true",
         help="print the chart instead of writing a file",
     )
+
+    play = subparsers.add_parser(
+        "play",
+        help="play a recording with its chords, and correct them as you listen",
+        description=(
+            "Open a page that plays the recording with its chords bar by bar. "
+            "Double-click a chord to correct it: corrections are saved beside the "
+            "recording, written into the chart, and kept when it is analysed again."
+        ),
+    )
+    play.add_argument("file", metavar="FILE", help="the recording")
+    play.add_argument(
+        "--chart", metavar="FILE",
+        help="the chart to keep up to date (default: the one beside the recording)",
+    )
+    play.add_argument("--port", type=int, default=0,
+                      help="port on 127.0.0.1 (default: any free one)")
+    play.add_argument("--no-browser", dest="browser", action="store_false",
+                      help="print the address instead of opening a browser")
+    _add_analysis_options(play)
 
     update = subparsers.add_parser(
         "update",
@@ -293,6 +314,11 @@ def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
         "--no-frontmatter", dest="frontmatter", action="store_false",
         help="leave the YAML properties block out of a markdown chart",
     )
+    parser.add_argument(
+        "--play-along", dest="play_along", action="store_true",
+        help="also write an HTML page beside the recording that plays it "
+             "with the chords bar by bar",
+    )
 
 
 def _add_common(parser: argparse.ArgumentParser, suppress: bool = False) -> None:
@@ -337,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_record(args)
         if args.command in ("analyze", "analyse"):
             return cmd_analyze(args)
+        if args.command == "play":
+            return cmd_play(args)
         if args.command == "update":
             return cmd_update(args)
         if args.command == "nowplaying":
@@ -536,20 +564,67 @@ def _analyse_recording(path: Path, args: argparse.Namespace, quiet: bool = False
         print(f"omacap: the recording was saved, but analysis failed: {exc}",
               file=sys.stderr)
         return 1
-    target = write_chart(
-        analysis,
-        default_chart_path(path, chart_format),
-        chart_format,
-        args.bars_per_line,
-        args.collapse,
-        args.sections,
-        args.frontmatter,
-    )
+    target = default_chart_path(path, chart_format)
+    analysis = _write_chart(analysis, path, target, chart_format, args)
     if quiet:
         print(target)
     else:
         _print_analysis_summary(analysis, target)
+    _write_play_along(analysis, path, args, quiet)
     return 0
+
+
+def _write_chart(analysis, audio: Path, target: Path, chart_format: str,
+                 args: argparse.Namespace, notes_out: list | None = None):
+    """Write the chart with the user's corrections in it, never over a hand edit.
+
+    Returns the analysis with those corrections applied, which is what everything
+    else written from it - the play-along page - must show too. What is said on
+    stderr is also appended to ``notes_out``, so the page can show it.
+    """
+    said = notes_out if notes_out is not None else []
+    from . import corrections
+
+    try:
+        fixed, write, notes = corrections.prepare(
+            analysis, audio, target,
+            lambda a: render(a, chart_format, args.bars_per_line, args.collapse,
+                             args.sections, args.frontmatter),
+            chordgrid=chart_format == "chordgrid")
+    except corrections.CorrectionError as exc:
+        # A corrections file we cannot read may still be someone's work: leave the
+        # chart as it is rather than rewriting it without them.
+        said.append(f"{exc}; {Path(target).name} was left as it is")
+        print(f"omacap: {said[-1]}", file=sys.stderr)
+        return analysis
+    for note in notes:
+        print(f"omacap: {note}", file=sys.stderr)
+    said.extend(notes)
+    if write:
+        write_chart(fixed, target, chart_format, args.bars_per_line,
+                    args.collapse, args.sections, args.frontmatter)
+        corrections.remember(target)
+    return fixed
+
+
+def _corrected(analysis, audio: Path):
+    from . import corrections
+
+    try:
+        return corrections.apply(analysis, corrections.load(audio))
+    except corrections.CorrectionError as exc:
+        print(f"omacap: {exc}", file=sys.stderr)
+        return analysis
+
+
+def _write_play_along(analysis, audio: Path, args: argparse.Namespace,
+                      quiet: bool = False) -> None:
+    if not getattr(args, "play_along", False):
+        return
+    from .player import write_player
+
+    page = write_player(analysis, audio)
+    print(page if quiet else f"page    {page}")
 
 
 def _print_analysis_summary(analysis, target: Path) -> None:
@@ -632,6 +707,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         if args.to_stdout:
             if index:
                 print()
+            analysis = _corrected(analysis, source)
             print(render(analysis, chart_format, args.bars_per_line,
                          args.collapse, args.sections, args.frontmatter))
             continue
@@ -640,15 +716,59 @@ def cmd_analyze(args: argparse.Namespace) -> int:
             Path(args.output).expanduser() if args.output
             else default_chart_path(source, chart_format)
         )
-        write_chart(analysis, target, chart_format, args.bars_per_line,
-                    args.collapse, args.sections, args.frontmatter)
+        analysis = _write_chart(analysis, source, target, chart_format, args)
         _print_analysis_summary(analysis, target)
+        _write_play_along(analysis, source, args)
         if len(sources) > 1:
             print()
 
     if len(sources) > 1 and not args.to_stdout:
         print(f"{len(sources) - failures} of {len(sources)} charted.")
     return 1 if failures and failures == len(sources) else 0
+
+
+def cmd_play(args: argparse.Namespace) -> int:
+    from .playserver import Session, serve
+
+    source = Path(args.file).expanduser()
+    if not source.is_file():
+        raise ValueError(f"{source} is not a file")
+    if args.chart_format:
+        chart_format = get_chart_format(args.chart_format)
+    elif args.chart:
+        chart_format = _chart_format_for(Path(args.chart))
+    else:
+        chart_format = DEFAULT_CHART_FORMAT
+    target = (Path(args.chart).expanduser() if args.chart
+              else default_chart_path(source, chart_format))
+
+    print("analysing…", flush=True)
+    try:
+        analysis = _load_analysis(source, args.chords)
+    except (AnalysisError, AnalysisUnavailable, DecodeError) as exc:
+        print(f"omacap: {source.name}: {exc}", file=sys.stderr)
+        return 1
+    def write(a):
+        notes: list[str] = []
+        return _write_chart(a, source, target, chart_format, args, notes), notes
+
+    session = Session(analysis, source, write)
+    server = serve(session, args.port)
+    url = f"http://127.0.0.1:{server.server_address[1]}/"
+    _print_analysis_summary(session.analysis, target)
+    print(f"page    {url}")
+    print("Ctrl+C stops.")
+    if args.browser:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print()
+    finally:
+        server.server_close()
+    return 0
 
 
 def _load_analysis(source: Path, vocabulary: str):
@@ -778,14 +898,12 @@ def _analyse_many(paths: list[Path], args: argparse.Namespace) -> int:
             print(f"  {path.name}: not charted ({exc})", file=sys.stderr)
             failures += 1
             continue
-        target = write_chart(
-            analysis, default_chart_path(path, chart_format),
-            chart_format, args.bars_per_line, args.collapse, args.sections,
-            args.frontmatter,
-        )
+        target = default_chart_path(path, chart_format)
+        analysis = _write_chart(analysis, path, target, chart_format, args)
         print(f"  {target.name}: {analysis.key.short_name}, "
               f"{analysis.tempo:.0f} BPM, {analysis.meter.name}, "
               f"{analysis.bar_count} bars")
+        _write_play_along(analysis, path, args)
     return 1 if failures == len(paths) else 0
 
 

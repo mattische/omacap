@@ -1220,3 +1220,15 @@ def test_t_md_still_gives_the_plain_grid(tmp_path, recording):
     assert "```chordgrid" not in text and "```" in text
 
 
+
+
+def test_analyze_can_write_a_play_along_page(capsys, recording):
+    assert cli.main(["analyze", "--play-along", str(recording)]) == 0
+    page = recording.with_suffix(".html")
+    assert page.is_file() and recording.name in page.read_text(encoding="utf-8")
+    assert str(page) in capsys.readouterr().out
+
+
+def test_no_play_along_page_unless_asked(recording):
+    assert cli.main(["analyze", str(recording)]) == 0
+    assert not recording.with_suffix(".html").exists()
