@@ -35,7 +35,9 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("b", "cycle bitrate (lossy formats only)"),
     ("d", "cycle capture source"),
     ("n", "name the next recording"),
-    ("a", "analyse the last take into a chord chart"),
+    ("a", "analyse the last take (or opened file) into a chord chart"),
+    ("p", "play along with it in the browser, chords beat by beat"),
+    ("o", "open another audio file (tab completes)"),
     ("y / n", "answer the question asked after a recording"),
     ("t", "chart format: markdown, plain text or chordgrid"),
     ("?", "toggle this help"),
@@ -73,6 +75,9 @@ class ViewModel:
     message_kind: str = "info"
     show_help: bool = False
     name_prompt: str | None = None
+    prompt_label: str = "name for next recording"
+    can_open: bool = False
+    play_url: str = ""
     analyse_prompt: str | None = None
     split_prompt: str | None = None
     track_count: int = 0
@@ -229,11 +234,15 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
         screen.field("Playing", playing, CYAN)
     if vm.next_name:
         screen.field("Name", vm.next_name, CYAN)
+    if vm.play_url:
+        screen.field("Page", vm.play_url, CYAN)
     screen.row()
 
     if vm.name_prompt is not None:
-        screen.divider("name for next recording")
-        screen.row("  " + screen.paint("> ", CYAN) + vm.name_prompt + screen.paint("█", DIM))
+        screen.divider(vm.prompt_label)
+        room = screen.inner - 6
+        typed = vm.name_prompt if len(vm.name_prompt) <= room else "…" + vm.name_prompt[-room + 1:]
+        screen.row("  " + screen.paint("> ", CYAN) + typed + screen.paint("█", DIM))
         screen.row("  " + screen.paint("enter to accept · esc to cancel", GREY))
     elif vm.split_prompt is not None:
         screen.divider("split into separate files?")
@@ -300,14 +309,16 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
 
 def _footer_lines(vm: ViewModel) -> list[str]:
     if vm.name_prompt is not None:
-        return ["typing a name · enter to accept"]
+        return [f"typing a {'path · tab completes' if vm.prompt_label == 'file to open' else 'name'}"
+                " · enter to accept"]
     if vm.analyse_prompt is not None:
         return ["y analyse · n skip · any other key dismisses it"]
     if vm.split_prompt is not None:
         return ["y split · n keep as one · any other key dismisses it"]
     action = "stop" if vm.state == "recording" else "record"
-    analyse = "a analyse · " if vm.can_analyse else ""
+    analyse = "a analyse · p play · " if vm.can_analyse else ""
+    opener = "o open · " if vm.can_open else ""
     return [
         f"space {action} · f format · b bitrate · d source",
-        f"{analyse}n name · t chart · ? help · q quit",
+        f"{analyse}{opener}n name · t chart · ? help · q quit",
     ]

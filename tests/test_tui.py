@@ -388,13 +388,13 @@ def test_analysing_writes_a_chart_and_reports_it(app, monkeypatch):
         written["source"] = path
         return FakeAnalysis()
 
-    def fake_write(analysis, target, chart_format, *args, **kwargs):
+    def fake_write(analysis, audio, target, chart_format, *args, **kwargs):
         written["target"] = target
         written["format"] = chart_format
-        return target
+        return analysis
 
     monkeypatch.setattr("omacap.analysis.report.analyse_file", fake_analyse)
-    monkeypatch.setattr(tui, "write_chart", fake_write)
+    monkeypatch.setattr("omacap.cli._write_chart", fake_write)
 
     press(app, "a")
     assert written["source"] == app.last_recording
@@ -423,6 +423,73 @@ def test_analysis_is_refused_while_recording(app):
     press(app, "a")
     assert app.message_kind == "error"
     assert "Stop recording" in app.message
+
+
+@pytest.fixture
+def take(tmp_path, monkeypatch):
+    """A real synthesised song on disk, and a TUI analysis that reads it."""
+    from omacap.analysis.audio import AudioBuffer
+    from omacap.analysis.report import analyse_buffer
+    from synth import SR, song
+
+    path = tmp_path / "Take.wav"
+    path.write_bytes(b"\0" * 64)
+    analysis = analyse_buffer(AudioBuffer(song([(0, ""), (7, ""), (9, "m"), (5, "")],
+                                               bars=8), SR), path)
+    monkeypatch.setattr("omacap.analysis.report.analyse_file", lambda p, **k: analysis)
+    monkeypatch.setattr(tui, "open_in_browser", lambda url: None)
+    return path
+
+
+def test_any_file_can_be_opened_and_analysed(app, take, monkeypatch):
+    monkeypatch.setattr(tui, "analysis_available", lambda: True)
+    press(app, "o")
+    assert app.view_model().prompt_label == "file to open"
+    app.name_prompt = str(take.parent) + "/Ta"
+    press(app, "\t")
+    assert app.name_prompt == str(take)
+    press(app, "q\x7f\r")            # keys stay in the prompt
+    assert app.running and app.last_recording == take.absolute()
+    press(app, "a")
+    assert app.message_kind == "success"
+    assert take.with_suffix(".md").is_file()
+
+
+def test_opening_a_missing_file_says_so(app, monkeypatch):
+    monkeypatch.setattr(tui, "analysis_available", lambda: True)
+    press(app, "o")
+    app.name_prompt = "/no/such/song.mp3"
+    press(app, "\r")
+    assert app.message_kind == "error" and app.last_recording is None
+
+
+def test_a_keeps_a_chart_edited_by_hand(app, take):
+    """The TUI's a goes through corrections like omacap analyze does."""
+    from omacap import corrections
+    from test_corrections import _replace_bar
+
+    app.chart_format = "chordgrid"
+    app.open_file(str(take))
+    press(app, "a")
+    chart = take.with_suffix(".md")
+    chart.write_text(_replace_bar(chart.read_text(encoding="utf-8"), 1, "F#m"),
+                     encoding="utf-8")
+    press(app, "a")
+    assert corrections.corrections_path(take).is_file()
+    assert corrections.read_chart(chart.read_text(encoding="utf-8"))[1][1] == "F#m"
+
+
+def test_p_serves_the_play_along_page_until_quitting(app, take):
+    import urllib.request
+
+    app.open_file(str(take))
+    press(app, "p")
+    url = app.view_model().play_url
+    assert url.startswith("http://127.0.0.1:") and app.message_kind == "success"
+    with urllib.request.urlopen(url) as response:
+        assert "Take" in response.read().decode()
+    app.stop_playing()
+    assert app.view_model().play_url == ""
 
 
 def test_the_chart_format_cycles(app):
@@ -483,7 +550,7 @@ def test_pressing_y_analyses_the_take(app, monkeypatch):
         return _FakeAnalysis()
 
     monkeypatch.setattr("omacap.analysis.report.analyse_file", record_call)
-    monkeypatch.setattr(tui, "write_chart", lambda a, target, fmt, *rest: target)
+    monkeypatch.setattr("omacap.cli._write_chart", lambda a, *rest, **kw: a)
 
     press(app, " ")
     press(app, " ")
@@ -497,7 +564,7 @@ def test_enter_also_accepts(app, monkeypatch):
     monkeypatch.setattr(
         "omacap.analysis.report.analyse_file", lambda path, **kwargs: _FakeAnalysis()
     )
-    monkeypatch.setattr(tui, "write_chart", lambda a, target, fmt, *rest: target)
+    monkeypatch.setattr("omacap.cli._write_chart", lambda a, *rest, **kw: a)
     press(app, " ")
     press(app, " ")
     app.handle_key("\r")
@@ -702,7 +769,7 @@ def test_analysis_after_a_split_charts_the_pieces(app, monkeypatch, tmp_path):
         "omacap.analysis.report.analyse_file",
         lambda path, **kw: charted.append(path) or _FakeAnalysis(),
     )
-    monkeypatch.setattr(tui, "write_chart", lambda a, target, fmt, *rest: target)
+    monkeypatch.setattr("omacap.cli._write_chart", lambda a, *rest, **kw: a)
 
     record_tracks(app, ["One", "Two"])
     press(app, "y")

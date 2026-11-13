@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 import os
 import select
 import shutil
@@ -12,14 +13,15 @@ import time
 import tty
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 from . import capture, ui
 from .analysis import analysis_available
 from .chart import (
+    BARS_PER_LINE,
     CHART_FORMATS,
     chart_format_label,
     default_chart_path,
-    write_chart,
 )
 from .devices import AudioSystemError, Source, list_monitors, resolve_source
 from .formats import FORMATS, AudioFormat, get_format, next_format
@@ -75,6 +77,9 @@ class TuiApp:
         self.chart_format: str = CHART_FORMATS[0]
         self.next_name: str | None = None
         self.name_prompt: str | None = None
+        self.prompt_kind = "name"           # what the text prompt is for: name or open
+        self._analysed: tuple = ()          # (path, analysis), so p after a needs no rerun
+        self._play = None                   # (server, path) while a play-along page is up
         self.analyse_prompt: str | None = None
         self.split_prompt: str | None = None
         self.update_notice: str = ""
@@ -129,6 +134,10 @@ class TuiApp:
             message_kind=self.message_kind,
             show_help=self.show_help,
             name_prompt=self.name_prompt,
+            prompt_label=("file to open" if self.prompt_kind == "open"
+                          else "name for next recording"),
+            can_open=analysis_available(),
+            play_url=self._play_url(),
         )
 
     # -- actions -----------------------------------------------------------
@@ -335,17 +344,8 @@ class TuiApp:
             self.notify("Record something first, then press a to analyse it.", "error")
             return
 
-        self.notify(f"Analysing {self.last_recording.name}\u2026")
-        self.draw(force=True)
         try:
-            from .analysis.report import analyse_file
-
-            analysis = analyse_file(self.last_recording)
-            target = write_chart(
-                analysis,
-                default_chart_path(self.last_recording, self.chart_format),
-                self.chart_format,
-            )
+            analysis, target, notes = self._chart(self.last_recording, fresh=True)
         except Exception as exc:  # surfaced in the interface, never a traceback
             self.notify(str(exc), "error")
             return
@@ -354,6 +354,9 @@ class TuiApp:
             f"   {analysis.tempo:.0f} BPM   {analysis.meter.name}"
             f"   {analysis.bar_count} bars"
         )
+        if notes:
+            self.notify(notes[-1], "error")
+            return
         self.notify(
             f"Chart written to {target.name}: {analysis.key.name},"
             f" {analysis.tempo:.0f} BPM, {analysis.meter.name},"
@@ -361,21 +364,24 @@ class TuiApp:
             "success",
         )
 
+    def _chart(self, path: Path, fresh: bool = False):
+        """Analyse ``path`` and write its chart with the user's corrections in it.
+
+        Goes through the same path as ``omacap analyze``, so a correction wins and
+        a chart edited in Obsidian is read back, never overwritten.
+        Returns (analysis with corrections, chart path, what was said).
+        """
+        self._analysed_for(path, fresh)
+        notes: list[str] = []
+        fixed = _write_chart_quiet(self._analysed[1], path, self.chart_format, notes)
+        return fixed, default_chart_path(path, self.chart_format), notes
+
     def analyse_pieces(self) -> None:
         """Chart each file a split produced. One failure keeps the rest."""
-        from .analysis.report import analyse_file
-
         charted = 0
         for path in self._pieces:
-            self.notify(f"Analysing {path.name}…")
-            self.draw(force=True)
             try:
-                analysis = analyse_file(path)
-                target = write_chart(
-                    analysis,
-                    default_chart_path(path, self.chart_format),
-                    self.chart_format,
-                )
+                analysis, target, _ = self._chart(path, fresh=True)
             except Exception:
                 continue
             charted += 1
@@ -387,6 +393,69 @@ class TuiApp:
             self.notify(f"Charted {charted} of {len(self._pieces)} files.", "success")
         else:
             self.notify("None of the pieces could be charted.", "error")
+
+    def play_along(self) -> None:
+        """Serve the play-along page for the current file and open it."""
+        if self.busy("Stop recording before playing along."):
+            return
+        path = self.last_recording
+        if path is None or not path.is_file():
+            self.notify("Record something or press o to open a file first.", "error")
+            return
+        from .playserver import Session, serve
+
+        try:
+            def write(analysis):
+                notes: list[str] = []
+                return _write_chart_quiet(analysis, path, self.chart_format, notes), notes
+
+            self._analysed_for(path)
+            session = Session(self._analysed[1], path, write)
+            server = serve(session)
+        except Exception as exc:
+            self.notify(str(exc), "error")
+            return
+        self.stop_playing()
+        import threading
+
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self._play = (server, path)
+        url = self._play_url()
+        open_in_browser(url)
+        self.notify(session.notes[-1] if session.notes
+                    else f"Playing along with {path.name} at {url}",
+                    "error" if session.notes else "success")
+
+    def _analysed_for(self, path: Path, fresh: bool = False) -> None:
+        if fresh or not self._analysed or self._analysed[0] != path:
+            from .analysis.report import analyse_file
+
+            self.notify(f"Analysing {path.name}\u2026")
+            self.draw(force=True)
+            self._analysed = (path, analyse_file(path))
+
+    def _play_url(self) -> str:
+        if not self._play:
+            return ""
+        return f"http://127.0.0.1:{self._play[0].server_address[1]}/"
+
+    def stop_playing(self) -> None:
+        if self._play:
+            server = self._play[0]
+            self._play = None
+            server.shutdown()
+            server.server_close()
+
+    def open_file(self, text: str) -> None:
+        """Make a file that was not recorded here the one a and p work on."""
+        path = Path(text.strip().strip("'\"").removeprefix("file://")).expanduser()
+        if not path.is_file():
+            self.notify(f"No such file: {text.strip()}", "error")
+            return
+        self.last_recording = path.absolute()   # not resolve(): a symlink keeps its files beside it
+        self._pieces = []
+        self.notify(f"{path.name} opened. a for a chord chart, p to play along.",
+                    "success")
 
     def cycle_chart_format(self) -> None:
         index = CHART_FORMATS.index(self.chart_format)
@@ -472,17 +541,31 @@ class TuiApp:
             self.cycle_source()
         elif key == "a":
             self.analyse_last()
+        elif key == "p":
+            self.play_along()
+        elif key == "o":
+            if analysis_available() and not self.busy("Stop recording before opening a file."):
+                self.prompt_kind = "open"
+                folder = self.last_recording.parent if self.last_recording else self.output_dir
+                self.name_prompt = shorten_home(folder) + "/"
         elif key == "t":
             self.cycle_chart_format()
         elif key == "n":
             if not self.busy("Stop recording before naming the next file."):
+                self.prompt_kind = "name"
                 self.name_prompt = self.next_name or ""
         elif key in ("?", "h"):
             self.show_help = not self.show_help
 
     def handle_name_key(self, key: str) -> None:
         assert self.name_prompt is not None
-        if key in ("\r", "\n"):
+        opening = self.prompt_kind == "open"
+        if key in ("\r", "\n") and opening:
+            text, self.name_prompt = self.name_prompt, None
+            self.open_file(text)
+        elif key == "\t" and opening:
+            self.name_prompt = complete_path(self.name_prompt)
+        elif key in ("\r", "\n"):
             name = self.name_prompt.strip()
             self.next_name = sanitize_basename(name) if name else None
             self.name_prompt = None
@@ -493,14 +576,14 @@ class TuiApp:
             )
         elif key == "\x1b":
             self.name_prompt = None
-            self.notify("Name unchanged.")
+            self.notify("Nothing opened." if opening else "Name unchanged.")
         elif key in ("\x7f", "\b"):
             self.name_prompt = self.name_prompt[:-1]
         elif key == "\x03":
             self.name_prompt = None
             self.running = False
         elif key.isprintable():
-            self.name_prompt = (self.name_prompt + key)[:60]
+            self.name_prompt = (self.name_prompt + key)[:1000 if opening else 60]
 
     # -- meter -------------------------------------------------------------
 
@@ -549,6 +632,7 @@ class TuiApp:
             finally:
                 if self.recorder is not None and self.recorder.is_running:
                     self.recorder.stop()
+                self.stop_playing()
                 sys.stdout.write(SHOW_CURSOR + LEAVE_ALT_SCREEN)
                 sys.stdout.flush()
         for entry in self.recordings:
@@ -613,6 +697,45 @@ def read_keys(timeout: float) -> list[str]:
     except OSError:
         return []
     return list(data)
+
+
+#: The chart options ``omacap analyze`` uses by default.
+CHART_OPTIONS = SimpleNamespace(bars_per_line=BARS_PER_LINE, collapse=True,
+                                sections=True, frontmatter=True)
+
+
+def _write_chart_quiet(analysis, path: Path, chart_format: str, notes: list):
+    from .cli import _write_chart
+
+    return _write_chart(analysis, path, default_chart_path(path, chart_format),
+                        chart_format, CHART_OPTIONS, notes, echo=False)
+
+
+def open_in_browser(url: str) -> None:
+    """Open ``url`` without the browser's own chatter landing on the TUI's screen."""
+    import subprocess
+
+    try:
+        subprocess.Popen(["xdg-open", url], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        pass   # the address is on screen to open by hand
+
+
+def complete_path(text: str) -> str:
+    """Tab completion: extend ``text`` as far as every matching path agrees."""
+    expanded = os.path.expanduser(text)
+    matches = glob.glob(glob.escape(expanded) + "*")
+    if not matches:
+        return text
+    common = os.path.commonprefix(matches)
+    if len(matches) == 1 and os.path.isdir(common):
+        common += "/"
+    if expanded != text:   # keep the ~ the user typed
+        home = os.path.expanduser("~")
+        common = "~" + common[len(home):] if common.startswith(home) else common
+    return common if len(common) >= len(text) else text
 
 
 def shorten_home(path: Path) -> str:

@@ -223,7 +223,9 @@ pressing play will not stop it straight away.
 | `b` | cycle the bitrate (lossy formats only) |
 | `d` | cycle the capture source |
 | `n` | name the next recording |
-| `a` | analyse the last take into a chord chart |
+| `a` | analyse the last take, or the opened file, into a chord chart |
+| `p` | play along with it: the page from `omacap play`, opened in the browser |
+| `o` | open another audio file instead (`tab` completes the path) |
 | `y` / `n` | answer the question asked after a recording |
 | `t` | chart format: markdown, plain text or chordgrid |
 | `?` or `h` | show the key list |
@@ -518,7 +520,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.17.0"
+omacap: "0.18.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -628,7 +630,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.17.0"
+omacap: "0.18.0"
 ---
 ````
 
@@ -764,6 +766,9 @@ songs - see `CLAUDE.md`. `--no-sections` writes one grid for the whole song.
 omacap play song.mp3
 omacap play song.mp3 --chart "~/Vault/Songs/Song - omacap.md"
 ```
+
+In the TUI, `p` does the same for the last take, and `o` opens any other
+file first; the page stays up until you quit.
 
 `omacap play` analyses the recording, writes its chart as `analyze` would, and
 opens a page in the browser that plays the song with its chords, four bars to a

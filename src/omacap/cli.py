@@ -575,7 +575,8 @@ def _analyse_recording(path: Path, args: argparse.Namespace, quiet: bool = False
 
 
 def _write_chart(analysis, audio: Path, target: Path, chart_format: str,
-                 args: argparse.Namespace, notes_out: list | None = None):
+                 args: argparse.Namespace, notes_out: list | None = None,
+                 echo: bool = True):
     """Write the chart with the user's corrections in it, never over a hand edit.
 
     Returns the analysis with those corrections applied, which is what everything
@@ -595,9 +596,10 @@ def _write_chart(analysis, audio: Path, target: Path, chart_format: str,
         # A corrections file we cannot read may still be someone's work: leave the
         # chart as it is rather than rewriting it without them.
         said.append(f"{exc}; {Path(target).name} was left as it is")
-        print(f"omacap: {said[-1]}", file=sys.stderr)
+        if echo:
+            print(f"omacap: {said[-1]}", file=sys.stderr)
         return analysis
-    for note in notes:
+    for note in notes if echo else ():   # the TUI owns the screen and shows them itself
         print(f"omacap: {note}", file=sys.stderr)
     said.extend(notes)
     if write:

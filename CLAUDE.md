@@ -24,13 +24,14 @@ All planned stages are finished, tested and pushed.
 - **Stage 3 — playing along.** `omacap play` serves a page that plays the
   recording with its chords, beat by beat, and lets the chords be corrected while
   listening; `analyze --play-along` writes the same page to disk, read-only.
+  In the TUI, `p` serves it for the last take and `o` opens any other file.
   Corrections live in `<song>.chords.json` and win over every later analysis, and
   a chart edited by hand in Obsidian is read back rather than overwritten.
 - **Track splitting.** `omacap split` and `record --split`, named from MPRIS.
 - **Distribution.** `install.sh` for a one-line install, `omacap update` to
   update in place, and a cached background update check that posts a notice.
 
-941 tests pass (`pytest`). Nothing is known to be broken.
+946 tests pass (`pytest`). Nothing is known to be broken.
 
 ## Design decisions that matter
 
@@ -96,6 +97,12 @@ cannot write files, so `playserver.py` serves it on 127.0.0.1 with stdlib
 in the page; another site in the browser cannot set a custom header cross-origin
 without a CORS preflight, which the server never answers. Audio is served with
 Range support, or a click on a beat restarts the song instead of seeking.
+
+**The TUI writes charts through `cli._write_chart` too**, with `echo=False`:
+it owns the screen, so notes are shown in its message line rather than printed,
+and the browser is started with its output sent to /dev/null for the same
+reason. Before 0.18.0 `a` in the TUI called `write_chart` directly and would
+overwrite a chart edited in Obsidian.
 
 **Analysis is numpy-only by choice.** librosa would have been faster to write but
 pulls in ~24 packages (numba, llvmlite, scikit-learn). The DSP here is a few
@@ -334,7 +341,7 @@ practically unreadable.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest                              # 941 tests, ~1-2 min, no sound card needed
+pytest                              # 946 tests, ~1-2 min, no sound card needed
 python tools/live_check.py          # real audio through the real sound card
 ```
 

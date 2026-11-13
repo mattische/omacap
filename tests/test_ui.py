@@ -188,3 +188,10 @@ def test_colour_is_on_for_a_normal_tty(monkeypatch):
     monkeypatch.setenv("TERM", "xterm-256color")
     assert colors_enabled(True) is True
     assert colors_enabled(False) is False
+
+
+def test_a_long_path_shows_its_end_inside_the_frame():
+    path = "~/" + "a/" * 60 + "song.mp3"
+    lines = render(sample(name_prompt=path, prompt_label="file to open"), 60, use_color=False)
+    assert all(len(line) == 60 for line in lines)
+    assert any("song.mp3█" in line for line in lines)
