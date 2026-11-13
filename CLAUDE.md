@@ -24,14 +24,15 @@ All planned stages are finished, tested and pushed.
 - **Stage 3 — playing along.** `omacap play` serves a page that plays the
   recording with its chords, beat by beat, and lets the chords be corrected while
   listening; `analyze --play-along` writes the same page to disk, read-only.
-  In the TUI, `p` serves it for the last take and `o` opens any other file.
+  In the TUI, `p` serves it for the last take and `o` picks any other file
+  from a list of the folder.
   Corrections live in `<song>.chords.json` and win over every later analysis, and
   a chart edited by hand in Obsidian is read back rather than overwritten.
 - **Track splitting.** `omacap split` and `record --split`, named from MPRIS.
 - **Distribution.** `install.sh` for a one-line install, `omacap update` to
   update in place, and a cached background update check that posts a notice.
 
-946 tests pass (`pytest`). Nothing is known to be broken.
+948 tests pass (`pytest`). Nothing is known to be broken.
 
 ## Design decisions that matter
 
@@ -201,6 +202,10 @@ Worth knowing so they are not reintroduced:
   saw a browser playlist as a single endless track. A track is identified by
   `(trackid, title, artist)`. Spotify's desktop client does move the id, which is
   why this went unnoticed until the same playlist was played in a browser.
+- **An arrow key is three bytes.** `read_keys` used to hand the TUI one
+  character at a time, so `↑` arrived as `esc`, `[`, `A`: it closed whatever was
+  open and typed `[A`. `_KEY_RE` keeps an escape sequence together as one key; a
+  lone `esc` still arrives on its own.
 - **A repeat written once is not an edit.** `find_phrases()` collapses bars on
   their chord *names*, so two bars `C G` with the change on beat 3 and on beat 4
   are one phrase, written the way the first one sounds. Reading a chart back and
@@ -341,7 +346,7 @@ practically unreadable.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest                              # 946 tests, ~1-2 min, no sound card needed
+pytest                              # 948 tests, ~1-2 min, no sound card needed
 python tools/live_check.py          # real audio through the real sound card
 ```
 

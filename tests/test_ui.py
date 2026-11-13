@@ -190,8 +190,14 @@ def test_colour_is_on_for_a_normal_tty(monkeypatch):
     assert colors_enabled(False) is False
 
 
-def test_a_long_path_shows_its_end_inside_the_frame():
-    path = "~/" + "a/" * 60 + "song.mp3"
-    lines = render(sample(name_prompt=path, prompt_label="file to open"), 60, use_color=False)
+def test_the_picker_keeps_the_chosen_file_in_view_and_inside_the_frame():
+    from omacap.ui import PickerView
+
+    names = [f"song {i:02}.mp3" for i in range(40)] + ["x" * 200 + ".mp3"]
+    folder = "~/" + "deep/" * 30 + "Songs"
+    lines = render(sample(picker=PickerView(folder, "", names, 40)), 60, use_color=False)
+    assert any(line.rstrip(" │").endswith("/Songs") for line in lines)
     assert all(len(line) == 60 for line in lines)
-    assert any("song.mp3█" in line for line in lines)
+    assert any("› xxx" in line for line in lines)
+    assert not any("song 00" in line for line in lines)
+    assert any("41 in all" in line for line in lines)

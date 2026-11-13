@@ -1,4 +1,4 @@
 """omacap - capture whatever your computer is playing, straight to an audio file."""
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 __all__ = ["__version__"]

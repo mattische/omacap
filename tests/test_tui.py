@@ -441,26 +441,55 @@ def take(tmp_path, monkeypatch):
     return path
 
 
-def test_any_file_can_be_opened_and_analysed(app, take, monkeypatch):
+def test_any_file_can_be_picked_from_its_folder_and_analysed(app, take, monkeypatch):
     monkeypatch.setattr(tui, "analysis_available", lambda: True)
+    (take.parent / "Sub").mkdir()
+    (take.parent / "notes.txt").write_text("not audio")
+    (take.parent / "Other.MP3").write_bytes(b"")
+    app.last_recording = take.parent / "gone.wav"     # the folder of the last take
     press(app, "o")
-    assert app.view_model().prompt_label == "file to open"
-    app.name_prompt = str(take.parent) + "/Ta"
-    press(app, "\t")
-    assert app.name_prompt == str(take)
-    press(app, "q\x7f\r")            # keys stay in the prompt
-    assert app.running and app.last_recording == take.absolute()
+    picker = app.view_model().picker
+    assert picker.names == ["..", "Sub/", "Other.MP3", "Take.wav"]   # no .txt
+    press(app, "q")                                   # typing filters, never quits
+    assert app.running and app.view_model().picker.names == []
+    app.handle_key("\x7f")
+    press(app, "ta")
+    assert app.view_model().picker.names == ["Take.wav"]
+    press(app, "\r")
+    assert app.picker is None and app.last_recording == take.absolute()
     press(app, "a")
     assert app.message_kind == "success"
     assert take.with_suffix(".md").is_file()
 
 
-def test_opening_a_missing_file_says_so(app, monkeypatch):
+def test_the_picker_walks_folders_with_the_arrows(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(tui, "analysis_available", lambda: True)
+    (tmp_path / "songs").mkdir()
+    song = tmp_path / "songs" / "a.flac"
+    song.write_bytes(b"")
+    app.last_recording = tmp_path / "x.wav"
+    press(app, "o")
+    names = app.view_model().picker.names
+    for _ in range(names.index("songs/")):
+        app.handle_key(tui.DOWN)
+    app.handle_key("\r")
+    assert app.view_model().picker.folder.endswith("songs")
+    app.handle_key("\x7f")                          # backspace: up a folder
+    assert app.view_model().picker.folder == tui.shorten_home(tmp_path)
+    press(app, f"'{song}'")                          # a pasted, quoted path
+    app.handle_key("\r")
+    assert app.last_recording == song
+
+
+def test_escape_closes_the_picker(app, monkeypatch):
     monkeypatch.setattr(tui, "analysis_available", lambda: True)
     press(app, "o")
-    app.name_prompt = "/no/such/song.mp3"
-    press(app, "\r")
-    assert app.message_kind == "error" and app.last_recording is None
+    app.handle_key("\x1b")
+    assert app.picker is None and app.message == "Nothing opened."
+
+
+def test_an_arrow_key_arrives_as_one_key():
+    assert tui._KEY_RE.findall("a\x1b[A\x1b\x1b[6~b") == ["a", tui.UP, "\x1b", tui.PAGE_DOWN, "b"]
 
 
 def test_a_keeps_a_chart_edited_by_hand(app, take):

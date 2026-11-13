@@ -225,11 +225,17 @@ pressing play will not stop it straight away.
 | `n` | name the next recording |
 | `a` | analyse the last take, or the opened file, into a chord chart |
 | `p` | play along with it: the page from `omacap play`, opened in the browser |
-| `o` | open another audio file instead (`tab` completes the path) |
+| `o` | open another audio file instead, picked from a list (below) |
 | `y` / `n` | answer the question asked after a recording |
 | `t` | chart format: markdown, plain text or chordgrid |
 | `?` or `h` | show the key list |
 | `q` | quit |
+
+`o` lists the folder of the last take: its subfolders and every audio file
+omacap can read (wav, flac, mp3, m4a, opus, ogg, aac, aiff, wma). `↑`/`↓` choose,
+`enter` opens a folder or the file, `←` or `backspace` goes up a folder, and
+typing filters the list. Paste a path starting with `/` or `~` and press `enter`
+to go straight to it. `esc` closes the list.
 
 Settings are locked while a recording runs, so you cannot change the format
 half-way through a take.
@@ -520,7 +526,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "omacap_2026-09-25_08-52-01.wav"
-omacap: "0.18.0"
+omacap: "0.19.0"
 ---
 
 # omacap_2026-09-25_08-52-01
@@ -630,7 +636,7 @@ confidence_key: "high"
 confidence_tempo: "high"
 confidence_time_signature: "high"
 source: "MEDS sessionmix instr.mp3"
-omacap: "0.18.0"
+omacap: "0.19.0"
 ---
 ````
 

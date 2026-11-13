@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import glob
 import os
+import re
 import select
 import shutil
 import signal
@@ -77,7 +77,7 @@ class TuiApp:
         self.chart_format: str = CHART_FORMATS[0]
         self.next_name: str | None = None
         self.name_prompt: str | None = None
-        self.prompt_kind = "name"           # what the text prompt is for: name or open
+        self.picker: FilePicker | None = None
         self._analysed: tuple = ()          # (path, analysis), so p after a needs no rerun
         self._play = None                   # (server, path) while a play-along page is up
         self.analyse_prompt: str | None = None
@@ -134,8 +134,7 @@ class TuiApp:
             message_kind=self.message_kind,
             show_help=self.show_help,
             name_prompt=self.name_prompt,
-            prompt_label=("file to open" if self.prompt_kind == "open"
-                          else "name for next recording"),
+            picker=self.picker.view() if self.picker else None,
             can_open=analysis_available(),
             play_url=self._play_url(),
         )
@@ -521,6 +520,9 @@ class TuiApp:
         if self.name_prompt is not None:
             self.handle_name_key(key)
             return
+        if self.picker is not None:
+            self.handle_picker_key(key)
+            return
         if self.split_prompt is not None and self.answer_split_prompt(key):
             return
         if self.analyse_prompt is not None and self.answer_analyse_prompt(key):
@@ -545,27 +547,19 @@ class TuiApp:
             self.play_along()
         elif key == "o":
             if analysis_available() and not self.busy("Stop recording before opening a file."):
-                self.prompt_kind = "open"
                 folder = self.last_recording.parent if self.last_recording else self.output_dir
-                self.name_prompt = shorten_home(folder) + "/"
+                self.picker = FilePicker(folder if folder.is_dir() else Path.home())
         elif key == "t":
             self.cycle_chart_format()
         elif key == "n":
             if not self.busy("Stop recording before naming the next file."):
-                self.prompt_kind = "name"
                 self.name_prompt = self.next_name or ""
         elif key in ("?", "h"):
             self.show_help = not self.show_help
 
     def handle_name_key(self, key: str) -> None:
         assert self.name_prompt is not None
-        opening = self.prompt_kind == "open"
-        if key in ("\r", "\n") and opening:
-            text, self.name_prompt = self.name_prompt, None
-            self.open_file(text)
-        elif key == "\t" and opening:
-            self.name_prompt = complete_path(self.name_prompt)
-        elif key in ("\r", "\n"):
+        if key in ("\r", "\n"):
             name = self.name_prompt.strip()
             self.next_name = sanitize_basename(name) if name else None
             self.name_prompt = None
@@ -576,14 +570,28 @@ class TuiApp:
             )
         elif key == "\x1b":
             self.name_prompt = None
-            self.notify("Nothing opened." if opening else "Name unchanged.")
+            self.notify("Name unchanged.")
         elif key in ("\x7f", "\b"):
             self.name_prompt = self.name_prompt[:-1]
         elif key == "\x03":
             self.name_prompt = None
             self.running = False
         elif key.isprintable():
-            self.name_prompt = (self.name_prompt + key)[:1000 if opening else 60]
+            self.name_prompt = (self.name_prompt + key)[:60]
+
+    def handle_picker_key(self, key: str) -> None:
+        picker = self.picker
+        assert picker is not None
+        if key == "\x1b":
+            self.picker = None
+            self.notify("Nothing opened.")
+        elif key == "\x03":
+            self.picker, self.running = None, False
+        else:
+            chosen = picker.key(key)
+            if chosen is not None:
+                self.picker = None
+                self.open_file(str(chosen))
 
     # -- meter -------------------------------------------------------------
 
@@ -696,7 +704,11 @@ def read_keys(timeout: float) -> list[str]:
         data = os.read(sys.stdin.fileno(), 64).decode("utf-8", errors="ignore")
     except OSError:
         return []
-    return list(data)
+    return _KEY_RE.findall(data)
+
+
+#: An escape sequence (an arrow, page up...) is one key; anything else is a character.
+_KEY_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z~]|\x1bO[A-Za-z]|.", re.DOTALL)
 
 
 #: The chart options ``omacap analyze`` uses by default.
@@ -723,19 +735,85 @@ def open_in_browser(url: str) -> None:
         pass   # the address is on screen to open by hand
 
 
-def complete_path(text: str) -> str:
-    """Tab completion: extend ``text`` as far as every matching path agrees."""
-    expanded = os.path.expanduser(text)
-    matches = glob.glob(glob.escape(expanded) + "*")
-    if not matches:
-        return text
-    common = os.path.commonprefix(matches)
-    if len(matches) == 1 and os.path.isdir(common):
-        common += "/"
-    if expanded != text:   # keep the ~ the user typed
-        home = os.path.expanduser("~")
-        common = "~" + common[len(home):] if common.startswith(home) else common
-    return common if len(common) >= len(text) else text
+UP, DOWN, LEFT, RIGHT = "\x1b[A", "\x1b[B", "\x1b[D", "\x1b[C"
+PAGE_UP, PAGE_DOWN = "\x1b[5~", "\x1b[6~"
+
+
+class FilePicker:
+    """A folder's subfolders and the audio files omacap can read, to choose from.
+
+    Arrows move and enter goes in, backspace or left goes up a folder, and typing
+    filters the list. A filter starting with / or ~ is a path, for pasting one.
+    """
+
+    def __init__(self, folder: Path) -> None:
+        self.folder = folder.absolute()
+        self.filter = ""
+        self.index = 0
+        self.entries: list[Path] = []
+        self._read()
+
+    def _read(self) -> None:
+        from .cli import AUDIO_SUFFIXES
+
+        try:
+            children = [c for c in self.folder.iterdir() if not c.name.startswith(".")]
+        except OSError:
+            children = []
+        folders = sorted((c for c in children if c.is_dir()), key=lambda c: c.name.lower())
+        audio = sorted((c for c in children
+                        if c.suffix.lower() in AUDIO_SUFFIXES and c.is_file()),
+                       key=lambda c: c.name.lower())
+        self.entries = folders + audio
+        self.index = 0
+
+    def shown(self) -> list[Path]:
+        wanted = self.filter.lower()
+        found = [e for e in self.entries if wanted in e.name.lower()]
+        if not self.filter and self.folder.parent != self.folder:
+            found.insert(0, self.folder.parent)
+        return found
+
+    def _go(self, folder: Path) -> None:
+        self.folder, self.filter = folder.absolute(), ""
+        self._read()
+
+    def key(self, key: str) -> Path | None:
+        """Handle one key; the file chosen, once there is one."""
+        shown = self.shown()
+        if key in (UP, DOWN, PAGE_UP, PAGE_DOWN):
+            step = {UP: -1, DOWN: 1, PAGE_UP: -10, PAGE_DOWN: 10}[key]
+            self.index = max(0, min(len(shown) - 1, self.index + step))
+        elif key in ("\r", "\n", RIGHT):
+            pasted = self.filter.strip().strip("'\"").removeprefix("file://")
+            if pasted[:1] in ("/", "~"):
+                typed = Path(pasted).expanduser()
+                if typed.is_dir():
+                    self._go(typed)
+                    return None
+                return typed if key != RIGHT else None
+            if not shown:
+                return None
+            entry = shown[min(self.index, len(shown) - 1)]
+            if entry.is_dir():
+                self._go(entry)
+            elif key != RIGHT:
+                return entry
+        elif key == LEFT or (key in ("\x7f", "\b") and not self.filter):
+            if self.folder.parent != self.folder:
+                self._go(self.folder.parent)
+        elif key in ("\x7f", "\b"):
+            self.filter, self.index = self.filter[:-1], 0
+        elif len(key) == 1 and key.isprintable():
+            self.filter, self.index = self.filter + key, 0
+        return None
+
+    def view(self) -> "ui.PickerView":
+        shown = self.shown()
+        names = [".." if e == self.folder.parent and not self.filter
+                 else e.name + ("/" if e.is_dir() else "") for e in shown]
+        return ui.PickerView(shorten_home(self.folder), self.filter, names,
+                             min(self.index, max(0, len(shown) - 1)))
 
 
 def shorten_home(path: Path) -> str:

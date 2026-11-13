@@ -37,7 +37,7 @@ KEY_HELP: tuple[tuple[str, str], ...] = (
     ("n", "name the next recording"),
     ("a", "analyse the last take (or opened file) into a chord chart"),
     ("p", "play along with it in the browser, chords beat by beat"),
-    ("o", "open another audio file (tab completes)"),
+    ("o", "open another audio file from a list of the folder's files"),
     ("y / n", "answer the question asked after a recording"),
     ("t", "chart format: markdown, plain text or chordgrid"),
     ("?", "toggle this help"),
@@ -52,6 +52,14 @@ def colors_enabled(stream_is_tty: bool = True) -> bool:
     if os.environ.get("TERM") in ("dumb", ""):
         return False
     return stream_is_tty
+
+
+@dataclass
+class PickerView:
+    folder: str
+    filter: str
+    names: list[str]
+    index: int
 
 
 @dataclass
@@ -75,7 +83,7 @@ class ViewModel:
     message_kind: str = "info"
     show_help: bool = False
     name_prompt: str | None = None
-    prompt_label: str = "name for next recording"
+    picker: "PickerView | None" = None
     can_open: bool = False
     play_url: str = ""
     analyse_prompt: str | None = None
@@ -239,11 +247,13 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
     screen.row()
 
     if vm.name_prompt is not None:
-        screen.divider(vm.prompt_label)
+        screen.divider("name for next recording")
         room = screen.inner - 6
         typed = vm.name_prompt if len(vm.name_prompt) <= room else "…" + vm.name_prompt[-room + 1:]
         screen.row("  " + screen.paint("> ", CYAN) + typed + screen.paint("█", DIM))
         screen.row("  " + screen.paint("enter to accept · esc to cancel", GREY))
+    elif vm.picker is not None:
+        _picker(screen, vm.picker)
     elif vm.split_prompt is not None:
         screen.divider("split into separate files?")
         screen.row("  " + screen.paint(truncate(vm.split_prompt, screen.inner - 3), BOLD))
@@ -307,10 +317,37 @@ def render(vm: ViewModel, width: int = 72, use_color: bool = True) -> list[str]:
     return screen.lines
 
 
+PICKER_ROWS = 10
+
+
+def _picker(screen, picker: "PickerView") -> None:
+    screen.divider("open a file")
+    room = screen.inner - 3      # the end of a long folder is the part that says where you are
+    folder = picker.folder if len(picker.folder) <= room else "…" + picker.folder[-room + 1:]
+    screen.row("  " + screen.paint(folder, BOLD))
+    if picker.filter:
+        screen.row("  " + screen.paint("filter ", GREY) + picker.filter + screen.paint("█", DIM))
+    if not picker.names:
+        screen.row("  " + screen.paint("no folders or audio files here", GREY))
+    first = max(0, min(picker.index - PICKER_ROWS // 2, len(picker.names) - PICKER_ROWS))
+    for i, name in enumerate(picker.names[first:first + PICKER_ROWS], first):
+        text = truncate(name, screen.inner - 5)
+        if i == picker.index:
+            screen.row("  " + screen.paint("› " + text, BOLD, CYAN))
+        else:
+            screen.row("    " + (screen.paint(text, GREY) if name.endswith("/") or name == ".."
+                                 else text))
+    hidden = len(picker.names) - PICKER_ROWS
+    if hidden > 0:
+        screen.row("  " + screen.paint(f"{len(picker.names)} in all", DIM))
+
+
 def _footer_lines(vm: ViewModel) -> list[str]:
     if vm.name_prompt is not None:
-        return [f"typing a {'path · tab completes' if vm.prompt_label == 'file to open' else 'name'}"
-                " · enter to accept"]
+        return ["typing a name · enter to accept"]
+    if vm.picker is not None:
+        return ["↑↓ choose · enter open · ← or backspace up a folder",
+                "type to filter, or a path starting / or ~ · esc cancel"]
     if vm.analyse_prompt is not None:
         return ["y analyse · n skip · any other key dismisses it"]
     if vm.split_prompt is not None:
