@@ -122,7 +122,9 @@ def track(samples, sample_rate: float = SAMPLE_RATE, frame: int = FRAME):
             continue
         # Parabolic interpolation, so the pitch is not quantised to whole lags.
         before, at, after = acf[peak - 1], acf[peak], acf[peak + 1]
-        shift = 0.5 * (before - after) / max(before - 2 * at + after, 1e-12)
+        # A peak curves down, so the denominator is negative; max() here once
+        # clamped every shift to a whole lag and biased notes by up to 0.7 semitone.
+        shift = 0.5 * (before - after) / min(before - 2 * at + after, -1e-12)
         lag = peak + min(1.0, max(-1.0, shift))
         pitches.append(69 + 12 * float(np.log2((rate / lag) / 440.0)))
     return np.array(pitches), rate / HOP

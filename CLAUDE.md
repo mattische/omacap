@@ -158,7 +158,7 @@ the relevant tests; they encode the ground truth.
 | `analysis/report.py` | syncopation is measured per section | Averaged over a song a syncopated chorus and a straight verse cancel out. One recording here reads 0.001 whole-song and 0.283 for its one repeated section. `MIN_SECTION_BARS = 4` because a shorter section has too few bars to average a bar profile over. |
 | *bar-relative measurements must use trimmed audio* | `analyse_file` trims leading silence and every bar time is measured from the **trimmed** buffer. A tool that loads the file with `load_audio` alone and uses `analysis.bars` is out by the leading trim - 0.35 s on MEDS, about three sixteenths, and 1.39 s on the worst file here. Small, but enough to move a bar profile by a whole subdivision, which is what it did. `Analysis.audio_start` now reports it. This produced two wrong conclusions before it was found: that the bar onset profile was unusable, and that the bass tracker was 5-8 points worse than it is. Always `trim_silence(load_audio(path))`. |
 | *no multi-band onset* | Splitting onset into kick, snare and hat bands was measured against the one problem it was proposed for - dense material where every metrical position clears the floor - and does not help: all three bands stay full. It does confirm that the kick band alone (40-120 Hz) puts the peak on the downbeat where the full band peaks on the backbeat, which is the band `meter.py` already uses. No new code earned its place. |
-| *no bass line* | Recovering it is nearly within reach and was measured, not guessed. The bass is monophonic, so a time-domain method sidesteps the resolution limit that stops the chroma path down there: autocorrelation on a low-passed signal with a **93 ms** window gets 12 of 13 written notes exactly, including E1 at 41 Hz, with no bias and no octave errors, and holds 100% down to 125 ms notes. Window length is the whole game - 186 ms drops to 38% on 250 ms notes, 46 ms falls apart. What is not settled is whether it is the bass being followed: agreement with the chord root is 78/73/58% on three studio mixes but 26/35% on two other recordings, with errors smeared across every interval rather than one fixable mode. `tools/bass_probe.py` has it all. |
+| *no bass line* | Recovering it is nearly within reach and was measured, not guessed. The bass is monophonic, so a time-domain method sidesteps the resolution limit that stops the chroma path down there: autocorrelation on a low-passed signal with a **93 ms** window gets 12 of 13 written notes exactly, including E1 at 41 Hz, with no bias and no octave errors, and holds 100% down to 125 ms notes. Window length is the whole game - 186 ms drops to 38% on 250 ms notes, 46 ms falls apart. What is not settled is whether it is the bass being followed: agreement with the chord root is 78/73/58% on three studio mixes but 26/35% on two other recordings, with errors smeared across every interval rather than one fixable mode. Those figures predate a fix (2026-11-15): the parabolic interpolation divided by `max(curvature, 1e-12)`, and at a peak the curvature is negative, so every pitch was shifted a whole lag and pure tones read up to 0.7 semitone out (D3 as C#). With `min(..., -1e-12)` they are within 0.08, and root agreement rose 2-6 points (MEDS 79 to 82%, So Gung Ho 65 to 69%, The Last Song 74 to 75%). `tools/bass_probe.py` has it all. |
 | *no syncopation figure* | The Longuet-Higgins & Lee score works: on synthesised patterns it gives 0.00 for four-on-the-floor **and** for straight eighths (correctly - every off-beat there is followed by a played stronger position) and 1.08-1.57 for genuinely displaced ones. The bar-level onset profile it needs does not: on MEDS it peaks 1.75 beats into the bar rather than on the downbeat, and on two of five recordings every position clears the floor because dense material flattens the profile. `tools/syncopation_probe.py` holds the measurements and what it would take. |
 | `chart.py` | sections are letters, never "verse" or "chorus" | Naming them was tried and rejected. Loudness picks the wrong section: on MEDS the outro is -11.1 dB against the real chorus at -12.3. Recurrence gets MEDS right but has nothing to work with on The Last Song (every section occurs once) and on So Gung Ho picks a one-chord vamp that recurs 5 times. One of three, with a confident error. |
 | `chordgrid.py` | every block opens `show% measure-num count` | Asked for by the user. `measure-num` also takes a start number, which the plugin reads with `/measure-num(?::\s*(\d+)(?:[,\-](\d+))?)?/i`, so a section is written `measure-num: 31` - otherwise every block numbers from 1 and contradicts the heading above it. A test holds the spelling against that pattern. |
@@ -270,6 +270,36 @@ three charted songs, agreement / longest loop; omacap is 94/24, 84/48, 95/12, ke
   the tempo halves (the kick carries the octave), and the bass stem agrees with
   the chord root *less* than the full mix (37% against 65% on So Gung Ho).
   Separation costs about real time on 16 cores and ~1.7 GB on disk.
+
+**Cleaning a constant note out of the chroma** (measured 2026-11-13, prompted by
+a rockabilly track in A whose verse, A x3 / E x4 / A x1, came out as F#m / E: the
+bar grid and the loop are found, but every A reads F#m). F# is in the top two
+pitch classes of nearly every bar, E bars included, and the loudest band in the
+song is a broad 177-197 Hz hump that is only 1.4x stronger on onsets than between
+them. A + F# is A6, which no vocabulary has, so the minor triad wins. Six fixes
+were scored on the three charted songs plus this one (longest correct verse run,
+baseline 3 bars): median over time 0.25/0.5 s (3, 2), subtracting a per-pitch
+floor at p20/p40 (3, 5 - and So Gung Ho falls from 48 to 4, because its D pedal
+*is* a constant note), subtracting a median over frequency (4, 4, with Twinkle's
+key turning F# minor), and an HPSS soft mask (4). None reaches the verse. A
+constant pitch class is not evidence of noise: it can be a pedal, a drone or a
+sixth in the voicing. This one is corrected by hand on the play page.
+
+**The bass note on the one, to tell a chord from its relative** (measured
+2026-11-15, same rockabilly track). The verse's A bars start with a short A in the
+bass and then hold F# and E, which is why the chroma says F#m. Read at each
+downbeat, the bass names that verse **exactly**: A A A E E E E A, twice. Used as a
+bonus for the chords on that root - gated to chords sharing two notes with what
+the chroma heard, because ungated it cost So Gung Ho 20 bars of its loop - it
+looked like a clear win (verse run 3 to 9, the other songs untouched) **until the
+tracker's interpolation bug was fixed** (see *no bass line*). With a correct
+tracker it is a trade, not a gain: bonus 0.2 gives the verse 4 bars, 0.35 gives 6
+but costs MEDS 3 bars, 0.5 costs So Gung Ho 3. Taking the first held note rather
+than the commonest in the window was worse (So Gung Ho 48 to 25). The earlier gain
+was the bug's noise happening to fall the right way - a reminder to check the
+instrument before trusting a result that depends on it. The window (0.15 s) also
+catches higher instruments after a short root; separating the bass from them is
+what this would need.
 
 Stems are still worth having for *practice* - muting the guitar to play it - which
 is where they are listed under taking it further.
